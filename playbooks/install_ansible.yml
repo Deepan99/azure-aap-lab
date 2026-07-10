@@ -1,0 +1,88 @@
+---
+- name: Install Ansible on Target Systems
+  hosts: all
+  become: true
+  gather_facts: true
+
+  tasks:
+    # ----------------------------------------------------
+    # Ubuntu/Debian Installation
+    # ----------------------------------------------------
+    - name: Install Ansible on Debian/Ubuntu systems
+      block:
+        - name: Ensure gpg and dirmngr are installed
+          apt:
+            name:
+              - gnupg
+              - dirmngr
+              - software-properties-common
+            state: present
+            update_cache: true
+
+        - name: Add Ansible PPA repository (Ubuntu only)
+          apt_repository:
+            repo: 'ppa:ansible/ansible'
+            state: present
+          when: ansible_distribution == 'Ubuntu'
+
+        - name: Install Ansible package
+          apt:
+            name: ansible
+            state: present
+            update_cache: true
+      when: ansible_os_family == 'Debian'
+
+    # ----------------------------------------------------
+    # RHEL/CentOS/Rocky Linux Installation
+    # ----------------------------------------------------
+    - name: Install Ansible on Red Hat systems
+      block:
+        - name: Enable EPEL repository (CentOS/Rocky/RHEL)
+          dnf:
+            name: epel-release
+            state: present
+          when: ansible_distribution != 'RedHat'
+
+        - name: Enable Ansible subscription repository (RHEL only)
+          command: subscription-manager repos --enable=ansible-2.9-for-rhel-8-x86_64-rpms
+          when:
+            - ansible_distribution == 'RedHat'
+            - ansible_distribution_major_version == '8'
+          failed_when: false
+
+        - name: Enable Ansible Automation Platform repository (RHEL 9 only)
+          command: subscription-manager repos --enable=ansible-automation-platform-2.4-for-rhel-9-x86_64-rpms
+          when:
+            - ansible_distribution == 'RedHat'
+            - ansible_distribution_major_version == '9'
+          failed_when: false
+
+        - name: Install Ansible package
+          dnf:
+            name:
+              - ansible-core
+              - ansible
+            state: present
+            enablerepo: epel
+          failed_when: false
+
+        # Fallback to pip if packages not found in standard RHEL repos
+        - name: Install Ansible via pip if package install failed
+          pip:
+            name: ansible
+            state: present
+            executable: pip3
+      when: ansible_os_family == 'RedHat'
+
+    # ----------------------------------------------------
+    # Verification Task
+    # ----------------------------------------------------
+    - name: Verify Ansible Installation
+      command: ansible --version
+      register: ansible_version_output
+      changed_when: false
+
+    - name: Display Installed Ansible Version
+      debug:
+        var: ansible_version_output.stdout_lines[0]
+...
