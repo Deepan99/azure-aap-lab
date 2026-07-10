@@ -9,7 +9,7 @@
         name:
           - azure-mgmt-resource
           - azure-storage-blob
-          - azure-storage-fileshare
+          - azure-storage-file-share
           - azure-identity
         extra_args: --user
 
