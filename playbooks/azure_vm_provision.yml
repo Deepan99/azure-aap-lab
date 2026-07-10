@@ -1,21 +1,6 @@
 ---
-- name: Install Azure Python SDK dependencies on runner host
-  hosts: localhost
-  connection: local
-  gather_facts: false
-  tasks:
-    - name: Install required Azure Python packages into user space
-      pip:
-        name:
-          - azure-mgmt-resource
-          - azure-storage-blob
-          - azure-storage-file-share
-          - azure-identity
-        extra_args: --user
-
 - name: Provision a Demo VM in Microsoft Azure
-  hosts: localhost
-  connection: local
+  hosts: all
   gather_facts: false
 
   vars:
