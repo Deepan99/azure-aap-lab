@@ -1,0 +1,114 @@
+---
+- name: Deploy Red Hat Ansible Automation Platform (AAP)
+  hosts: all
+  become: true
+  gather_facts: true
+
+  vars:
+    # Red Hat Portal Registration Credentials
+    rh_username: "deeepan91"
+    rh_password: "cN?Sx7Bq*pMU#iX"
+    
+    # AAP Platform Configuration
+    aap_version: "2.4"
+    aap_admin_password: "AdminSecurePassword123!"
+    aap_db_password: "DbSecurePassword123!"
+    
+    # Paths
+    installer_dir: "/opt/ansible-automation-platform/installer"
+
+  tasks:
+    # ----------------------------------------------------
+    # 1. System Registration & Subscriptions
+    # ----------------------------------------------------
+    - name: Check system subscription status
+      command: subscription-manager status
+      register: sub_status
+      failed_when: false
+      changed_when: false
+
+    - name: Register with Red Hat Subscription Manager
+      community.general.redhat_subscription:
+        username: "{{ rh_username }}"
+        password: "{{ rh_password }}"
+        state: present
+      when: "'Current' not in sub_status.stdout"
+      register: reg_result
+
+    - name: Enable Ansible Automation Platform repository
+      command: "subscription-manager repos --enable=ansible-automation-platform-{{ aap_version }}-for-rhel-9-x86-64-rpms"
+      register: repo_result
+      changed_when: "'is enabled' in repo_result.stdout or repo_result.rc == 0"
+
+    # ----------------------------------------------------
+    # 2. Package Dependency Installation
+    # ----------------------------------------------------
+    - name: Install system package dependencies
+      dnf:
+        name:
+          - tar
+          - wget
+          - python3
+          - python3-pip
+          - git
+          - ansible-automation-platform-installer
+        state: present
+        update_cache: true
+
+    # ----------------------------------------------------
+    # 3. Create the Installer Inventory File
+    # ----------------------------------------------------
+    - name: Generate the AAP installation inventory configuration
+      copy:
+        content: |
+          [automationcontroller]
+          {{ ansible_default_ipv4.address | default(ansible_all_ipv4_addresses[0]) }} ansible_connection=local
+
+          [automationhub]
+
+          [execution_nodes]
+
+          [database]
+          {{ ansible_default_ipv4.address | default(ansible_all_ipv4_addresses[0]) }} ansible_connection=local
+
+          [all:vars]
+          # Platform Version
+          automation_platform_version='{{ aap_version }}'
+
+          # Web Admin UI Credentials
+          admin_password='{{ aap_admin_password }}'
+
+          # Red Hat Registry Credentials (required to pull EE containers)
+          registry_username='{{ rh_username }}'
+          registry_password='{{ rh_password }}'
+
+          # Local PostgreSQL Database Configurations
+          pg_sslmode='prefer'
+          pg_host='{{ ansible_default_ipv4.address | default(ansible_all_ipv4_addresses[0]) }}'
+          pg_port='5432'
+          pg_database='awx'
+          pg_username='awx'
+          pg_password='{{ aap_db_password }}'
+
+          # UI Web Port
+          controller_web_port=443
+        dest: "{{ installer_dir }}/inventory"
+        owner: root
+        group: root
+        mode: '0600'
+
+    # ----------------------------------------------------
+    # 4. Run the AAP Installer Script
+    # ----------------------------------------------------
+    - name: Run the Ansible Automation Platform setup script
+      command: "./setup.sh -i {{ installer_dir }}/inventory"
+      args:
+        chdir: "{{ installer_dir }}"
+      register: install_result
+      async: 1800  # Give it up to 30 minutes to install
+      poll: 30     # Check status every 30 seconds
+
+    - name: Output installation result
+      debug:
+        msg: "AAP Installation complete! Access the console at https://{{ ansible_host | default(inventory_hostname) }}"
+...
