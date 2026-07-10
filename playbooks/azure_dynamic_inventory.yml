@@ -1,0 +1,36 @@
+# Ansible Dynamic Inventory configuration for Azure
+# Save this file as 'azure_rm.yml' (the file name must end in azure_rm.yml or azure_rm.yaml)
+#
+# To test locally:
+#   ansible-inventory -i azure_rm.yml --graph
+#
+# Note: You must install the azure collection:
+#   ansible-galaxy collection install azure.azcollection
+# And install required Python libraries:
+#   pip install -r https://raw.githubusercontent.com/ansible-collections/azure/dev/requirements-azure.txt
+
+plugin: azure.azcollection.azure_rm
+
+# Authentication Sources:
+# 1. auto: Automatically looks for Azure CLI login, environment variables, or metadata service.
+# 2. cli: Uses active Azure CLI session (local dev testing).
+# 3. credential_file: Uses service principal credentials stored in ~/.azure/credentials.
+auth_source: auto
+
+# Limit hosts to specific resource groups (optional)
+# include_vm_resource_groups:
+#   - rg-ansible-automation-platform
+
+# Group VMs dynamically based on their attributes
+keyed_groups:
+  # Group VMs by region (e.g. location_eastus)
+  - key: location
+    prefix: location
+  # Group VMs by tags (e.g. tag_Environment_Lab)
+  - key: tags
+    prefix: tag
+
+# Define hostvars (how to connect to the hosts)
+hostvar_expressions:
+  # Use the public IP if available, fallback to private IP
+  ansible_host: public_dns_name | default(public_ip_addresses[0] | default(private_ip_address))

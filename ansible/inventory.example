@@ -1,0 +1,43 @@
+# Ansible Automation Platform Installer Inventory
+# Use this file to configure a single-node deployment of Automation Controller (formerly Tower)
+# with a local PostgreSQL database.
+
+[automationcontroller]
+localhost ansible_connection=local
+
+[automationhub]
+# Leave empty for single-node controller-only setup
+
+[execution_nodes]
+# Leave empty; automationcontroller will act as hybrid (control + execution) by default
+
+[database]
+localhost ansible_connection=local
+
+[all:vars]
+# ==========================================
+# Common Credentials & Config
+# ==========================================
+
+# Automation Controller Administrator Password
+admin_password='AdminSecurePassword123!'
+
+# PostgreSQL Database Settings
+pg_sslmode='prefer'
+pg_host='localhost'
+pg_port='5432'
+pg_database='awx'
+pg_username='awx'
+pg_password='DbSecurePassword123!'
+
+# Automation Controller Config
+# Set the port the web UI will listen on (default is 443)
+controller_web_port=443
+
+# ==========================================
+# Deployment Options
+# ==========================================
+# Set to true if you are behind a proxy
+# http_proxy=
+# https_proxy=
+# no_proxy=

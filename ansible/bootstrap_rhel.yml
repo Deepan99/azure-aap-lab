@@ -1,0 +1,85 @@
+---
+- name: Bootstrap RHEL 9 VM and Prepare Ansible Automation Platform (AAP) Installer
+  hosts: all
+  become: true
+  gather_facts: true
+  vars_prompt:
+    - name: rh_username
+      prompt: "Enter your Red Hat Customer Portal Username"
+      private: false
+    - name: rh_password
+      prompt: "Enter your Red Hat Customer Portal Password"
+      private: true
+
+  vars:
+    aap_version: "2.4"
+    installer_dir: "/usr/share/ansible-automation-platform-installer"
+
+  tasks:
+    - name: Check system subscription status
+      command: subscription-manager status
+      register: sub_status
+      failed_when: false
+      changed_when: false
+
+    - name: Register with Red Hat Subscription Manager
+      community.general.redhat_subscription:
+        username: "{{ rh_username }}"
+        password: "{{ rh_password }}"
+        state: present
+      when: "'Current' not in sub_status.stdout"
+      register: reg_result
+      until: reg_result is succeeded
+      retries: 3
+      delay: 10
+
+    - name: Attach to standard subscriptions (auto-attach)
+      command: subscription-manager attach --auto
+      when: reg_result.changed
+      register: attach_result
+      failed_when: false
+
+    - name: Enable Ansible Automation Platform repositories
+      command: "subscription-manager repos --enable=ansible-automation-platform-{{ aap_version }}-for-rhel-9-x86-64-rpms"
+      register: repo_result
+      changed_when: "'is enabled' in repo_result.stdout or repo_result.rc == 0"
+
+    - name: Install system dependencies
+      dnf:
+        name:
+          - tar
+          - wget
+          - python3
+          - python3-pip
+          - git
+        state: present
+        update_cache: true
+
+    - name: Install Ansible Automation Platform Installer package
+      dnf:
+        name: ansible-automation-platform-installer
+        state: present
+
+    - name: Ensure target directory exists for custom configuration
+      file:
+        path: /opt/aap-installer
+        state: directory
+        owner: "{{ ansible_user | default('azureuser') }}"
+        group: "{{ ansible_user | default('azureuser') }}"
+        mode: '0755'
+
+    - name: Copy official installer template to working directory
+      copy:
+        src: "{{ installer_dir }}/inventory"
+        dest: "/opt/aap-installer/inventory"
+        remote_src: true
+        force: false
+
+    - name: Notify user of next steps
+      debug:
+        msg: >
+          Bootstrap complete!
+          1. SSH into the VM: ssh {{ ansible_user }}@{{ ansible_host }}
+          2. Edit the inventory file at '/opt/aap-installer/inventory' to set your admin, database, and hub passwords.
+          3. Change directory: cd {{ installer_dir }}
+          4. Run the installer: sudo ./setup.sh -i /opt/aap-installer/inventory

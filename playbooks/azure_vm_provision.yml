@@ -1,0 +1,82 @@
+---
+- name: Provision a Demo VM in Microsoft Azure
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    resource_group: "rg-aap-managed-vms"
+    location: "eastus"
+    vnet_name: "vnet-aap-managed"
+    subnet_name: "subnet-default"
+    vm_name: "vm-aap-demo"
+    admin_user: "azureuser"
+    ssh_key_path: "~/.ssh/id_rsa.pub"
+
+  tasks:
+    - name: Create Resource Group
+      azure.azcollection.azure_rm_resourcegroup:
+        name: "{{ resource_group }}"
+        location: "{{ location }}"
+
+    - name: Create Virtual Network
+      azure.azcollection.azure_rm_virtualnetwork:
+        resource_group: "{{ resource_group }}"
+        name: "{{ vnet_name }}"
+        address_prefixes: "10.10.0.0/16"
+
+    - name: Create Subnet
+      azure.azcollection.azure_rm_subnet:
+        resource_group: "{{ resource_group }}"
+        virtual_network_name: "{{ vnet_name }}"
+        name: "{{ subnet_name }}"
+        address_prefix: "10.10.1.0/24"
+
+    - name: Create Network Security Group
+      azure.azcollection.azure_rm_securitygroup:
+        resource_group: "{{ resource_group }}"
+        name: "nsg-{{ vm_name }}"
+        rules:
+          - name: AllowSSH
+            protocol: Tcp
+            destination_port_range: 22
+            access: Allow
+            priority: 100
+            direction: Inbound
+
+    - name: Create Public IP Address
+      azure.azcollection.azure_rm_publicipaddress:
+        resource_group: "{{ resource_group }}"
+        name: "pip-{{ vm_name }}"
+        allocation_method: Static
+
+    - name: Create Network Interface Card (NIC)
+      azure.azcollection.azure_rm_networkinterface:
+        resource_group: "{{ resource_group }}"
+        name: "nic-{{ vm_name }}"
+        virtual_network: "{{ vnet_name }}"
+        subnet: "{{ subnet_name }}"
+        security_group: "nsg-{{ vm_name }}"
+        public_ip_name: "pip-{{ vm_name }}"
+
+    - name: Create Virtual Machine
+      azure.azcollection.azure_rm_virtualmachine:
+        resource_group: "{{ resource_group }}"
+        name: "{{ vm_name }}"
+        vm_size: Standard_B2s
+        admin_username: "{{ admin_user }}"
+        ssh_password_enabled: false
+        ssh_public_keys:
+          - path: "/home/{{ admin_user }}/.ssh/authorized_keys"
+            key_data: "{{ lookup('file', ssh_key_path) }}"
+        network_interfaces: "nic-{{ vm_name }}"
+        image:
+          publisher: Canonical
+          offer: 0001-com-ubuntu-server-jammy
+          sku: 22_04-lts-gen2
+          version: latest
+      register: vm_result
+
+    - name: Output VM IP Address
+      debug:
+        msg: "VM created! Public IP is: {{ vm_result.ansible_facts.azure_vm.properties.networkProfile.networkInterfaces[0].properties.ipConfigurations[0].properties.publicIPAddress.properties.ipAddress | default('Not found') }}"
