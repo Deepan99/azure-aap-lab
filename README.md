@@ -13,11 +13,17 @@ Why this repo exists
 - Quickstart
 - Architecture
 - Prerequisites
+- Cost Estimation
 - Terraform: Provision the VM
 - Ansible: Register RHEL & Bootstrap Installer
 - Run the AAP Installer
 - Access & Configure AAP
 - Automate Azure from AAP
+- Security Best Practices
+- Monitoring and Logging
+- Backup and Restore
+- Upgrade and Migration
+- Repository Improvements
 - Troubleshooting
 - Cleanup
 - Contributing
@@ -25,9 +31,10 @@ Why this repo exists
 - Contact
 
 ## Quickstart (3-minute)
-1. Edit `terraform/terraform.tfvars` (set unique `public_ip_dns_label`, `ssh_public_key_path`).
-2. cd terraform && terraform init && terraform apply -auto-approve
-3. Use `terraform` output to SSH to the VM, then cd to `/opt/aap-installer` and follow the installer steps in this README.
+1. Set up credentials using Ansible Vault (see `playbooks/SECURITY_SETUP.md`).
+2. Edit `terraform/terraform.tfvars` (set unique `public_ip_dns_label`, `ssh_public_key_path`, and `allowed_ssh_source_ip`).
+3. cd terraform && terraform init && terraform apply -auto-approve
+4. Use `terraform` output to SSH to the VM, then cd to `/opt/aap-installer` and follow the installer steps in this README.
 
 ## Architecture Diagram
 
@@ -59,6 +66,26 @@ graph TD
     VM -->|Installs| AAP[Ansible Automation Platform 2.4]
 ```
 
+## Cost Estimation
+
+Running this lab will incur Azure costs. Estimated monthly costs for the default configuration:
+
+| Resource | SKU | Est. Monthly Cost* |
+|----------|-----|-------------------|
+| VM (Standard_D4s_v5) | 4 vCPUs, 16GB RAM | $100-150 |
+| OS Disk (64GB Premium SSD) | P10 | $15-20 |
+| Data Transfer | ~100GB | $8-12 |
+| Public IP | Standard SKU | $3-5 |
+| Total | | **$126-187** |
+
+*Prices are estimates based on East US region as of 2026-08. Actual costs vary by region and usage.
+
+**Cost Optimization Tips:**
+- Stop/deallocate VM when not in use to save compute costs
+- Use smaller VM size (Standard_D2s_v5) for testing ($50-75/month)
+- Enable Azure Cost Management and billing alerts
+- Consider reserved instances for long-term deployments
+
 ## Prerequisites
 
 Before starting, ensure you have the following ready:
@@ -74,6 +101,8 @@ Before starting, ensure you have the following ready:
 ### Security note
 - Do NOT commit secrets (passwords, client secrets, private keys) into this repository.
 - Change any default passwords in `/opt/aap-installer/inventory` before production use.
+- Use Ansible Vault for credential management (see `playbooks/SECURITY_SETUP.md`).
+- Restrict SSH access by setting `allowed_ssh_source_ip` in `terraform.tfvars` to your public IP.
 
 ## Step 1: Provision infrastructure with Terraform
 
@@ -184,6 +213,110 @@ keyed_groups:
 - Red Hat registration errors: ensure your developer account has been fully activated and has entitlements remaining.
 - Installer hangs or services fail: check `/var/log/` and `journalctl` for details; installer logs appear in `/tmp/ansible-local-...` during run.
 - DNS not resolving: use the `public_ip_address` directly if `public_ip_dns_name` takes time to propagate.
+- Credential errors: Ensure you've set up Ansible Vault or environment variables as described in `playbooks/SECURITY_SETUP.md`.
+
+For comprehensive troubleshooting, see [TROUBLESHOOTING.md](TROUBLESHOOTING.md) which covers:
+- Infrastructure issues
+- Installation problems
+- Configuration issues
+- Runtime and performance issues
+- Security and network issues
+- Backup/restore and upgrade issues
+
+## Security Best Practices
+
+This repository includes comprehensive security improvements including credential management, network security, and input validation.
+
+**Key Security Features:**
+- Ansible Vault for credential management
+- Restricted SSH access by IP
+- Input validation for all configurations
+- Comprehensive security documentation
+
+See [playbooks/SECURITY_SETUP.md](playbooks/SECURITY_SETUP.md) for detailed security setup instructions.
+
+## Repository Improvements
+
+This repository has been significantly enhanced with production-ready features:
+
+**🔒 Security Improvements:**
+- Removed hardcoded credentials and implemented Ansible Vault
+- Added network security with IP-restricted SSH access
+- Input validation for all Terraform variables
+- Comprehensive security documentation
+
+**💰 Cost Management:**
+- Detailed cost estimation with optimization tips
+- Azure resource cost tracking
+
+**📊 Monitoring & Observability:**
+- Enhanced logging with configurable retention
+- Prometheus metrics exporter
+- Automated health checks
+- Azure Monitor integration
+- Grafana dashboard support
+
+**💾 Backup & Recovery:**
+- Automated backup procedures
+- Database and configuration backups
+- Point-in-time recovery
+- Azure Storage integration
+
+**🚀 Deployment Automation:**
+- Automated AAP installation
+- CI/CD pipeline with GitHub Actions
+- Automated validation and testing
+
+**🔧 Operations:**
+- Comprehensive upgrade procedures
+- Automated validation and testing
+- Extensive troubleshooting guide
+
+**📖 Documentation:**
+- Enhanced README with all features
+- Security setup guide
+- Monitoring configuration guide
+- Backup and restore procedures
+- Upgrade and migration guide
+- Comprehensive troubleshooting guide
+
+## Monitoring and Logging
+
+Comprehensive monitoring and logging capabilities are included to ensure visibility into system health and performance.
+
+**Features:**
+- Enhanced logging with configurable retention
+- Prometheus-compatible metrics exporter
+- Automated health checks
+- Optional Azure Monitor integration
+- Grafana dashboard support
+
+See [MONITORING.md](MONITORING.md) for complete monitoring setup and configuration.
+
+## Backup and Restore
+
+Automated backup and restore procedures protect your AAP deployment and data.
+
+**Features:**
+- Automated daily backups
+- Database and configuration backups
+- Configurable retention policies
+- Azure Storage integration
+- Point-in-time recovery
+
+See [BACKUP_RESTORE.md](BACKUP_RESTORE.md) for backup procedures and disaster recovery.
+
+## Upgrade and Migration
+
+Procedures for upgrading AAP are provided to ensure smooth transitions.
+
+**Features:**
+- Automated upgrade playbooks
+- Pre-upgrade validation and backup
+- Rollback capabilities
+- Version-specific upgrade notes
+
+See [UPGRADE_MIGRATION.md](UPGRADE_MIGRATION.md) for upgrade procedures and best practices.
 
 ## Cleanup
 
@@ -196,10 +329,23 @@ terraform destroy -auto-approve
 
 Note: this deletes the resource group, public IP, VM, and related resources.
 
+## Security Best Practices
+
+This repository includes several security improvements:
+
+1. **Credential Management**: Use Ansible Vault or environment variables instead of hardcoded credentials (see `playbooks/SECURITY_SETUP.md`)
+2. **Network Security**: Restrict SSH access by setting `allowed_ssh_source_ip` in Terraform variables
+3. **Input Validation**: Terraform variables include validation to prevent misconfiguration
+4. **Health Checks**: Automated health checks verify AAP installation status
+5. **Git Security**: Updated `.gitignore` prevents committing sensitive files
+
+Always review security settings before deploying to production environments.
+
 ## Contributing
 
 PRs welcome. Please open issues for bug reports or feature requests.
 Keep terraform/ansible changes isolated to their directories and avoid adding sensitive data.
+Security-related changes should be prioritized and thoroughly tested.
 
 ## License
 

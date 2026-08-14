@@ -10,6 +10,10 @@
     - name: rh_password
       prompt: "Enter your Red Hat Customer Portal Password"
       private: true
+  vars:
+    # Alternative: Use environment variables or vault
+    # rh_username: "{{ lookup('env', 'RH_USERNAME') }}"
+    # rh_password: "{{ lookup('env', 'RH_PASSWORD') }}"
 
   vars:
     aap_version: "2.4"
@@ -32,6 +36,20 @@
       until: reg_result is succeeded
       retries: 3
       delay: 10
+      ignore_errors: true
+
+    - name: Alert on registration failure
+      debug:
+        msg: "WARNING: Red Hat registration failed. Please check credentials and try again."
+      when: reg_result is failed
+
+    - name: Fail on registration failure after retries
+      assert:
+        that:
+          - reg_result is succeeded
+        fail_msg: "Red Hat registration failed after 3 attempts. Please verify your credentials and network connectivity."
+        quiet: true
+      when: reg_result is failed
 
     - name: Attach to standard subscriptions (auto-attach)
       command: subscription-manager attach --auto
@@ -43,6 +61,20 @@
       command: "subscription-manager repos --enable=ansible-automation-platform-{{ aap_version }}-for-rhel-9-x86-64-rpms"
       register: repo_result
       changed_when: "'is enabled' in repo_result.stdout or repo_result.rc == 0"
+      ignore_errors: true
+
+    - name: Alert on repository enablement failure
+      debug:
+        msg: "WARNING: Failed to enable AAP repositories. This may be due to subscription issues."
+      when: repo_result is failed
+
+    - name: Fail on repository enablement failure
+      assert:
+        that:
+          - repo_result is succeeded
+        fail_msg: "Failed to enable AAP repositories. Please check your subscription status and try again."
+        quiet: true
+      when: repo_result is failed
 
     - name: Install system dependencies
       dnf:

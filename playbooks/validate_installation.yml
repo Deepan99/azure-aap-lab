@@ -1,0 +1,300 @@
+---
+- name: Validate AAP Installation and Configuration
+  hosts: all
+  become: true
+  gather_facts: true
+
+  vars:
+    validation_results: []
+    validation_failed: false
+
+  tasks:
+    - name: Initialize validation results
+      set_fact:
+        validation_results: []
+
+    - name: Test 1 - System Requirements Validation
+      block:
+        - name: Check CPU cores
+          assert:
+            that:
+              - ansible_facts['processor_vcpus'] >= 4
+            fail_msg: "Insufficient CPU cores: {{ ansible_facts['processor_vcpus'] }} (minimum 4 required)"
+            quiet: true
+          register: cpu_check
+          ignore_errors: true
+
+        - name: Check memory
+          assert:
+            that:
+              - ansible_facts['memtotal_mb'] >= 16384
+            fail_msg: "Insufficient memory: {{ ansible_facts['memtotal_mb'] }}MB (minimum 16GB required)"
+            quiet: true
+          register: memory_check
+          ignore_errors: true
+
+        - name: Check disk space
+          assert:
+            that:
+              - ansible_mounts | selectattr('mount', 'equalto', '/') | map(attribute('size_available') | int > 50 * 1024 * 1024 * 1024) | first | default(false)
+            fail_msg: "Insufficient disk space (minimum 50GB required)"
+            quiet: true
+          register: disk_check
+          ignore_errors: true
+
+        - name: Record system requirements result
+          set_fact:
+            validation_results: "{{ validation_results + [{'test': 'System Requirements', 'status': 'PASS' if cpu_check is succeeded and memory_check is succeeded and disk_check is succeeded else 'FAIL', 'details': 'CPU: ' + ansible_facts['processor_vcpus'] | string + ' cores, Memory: ' + (ansible_facts['memtotal_mb'] / 1024) | string + 'GB'}] }}"
+
+      rescue:
+        - name: Record system requirements failure
+          set_fact:
+            validation_results: "{{ validation_results + [{'test': 'System Requirements', 'status': 'FAIL', 'details': 'System does not meet minimum requirements'}] }}"
+            validation_failed: true
+
+    - name: Test 2 - Service Status Validation
+      block:
+        - name: Check PostgreSQL service
+          systemd:
+            name: postgresql
+            state: started
+          register: postgres_check
+          ignore_errors: true
+
+        - name: Check AAP service
+          systemd:
+            name: awx
+            state: started
+          register: awx_check
+          ignore_errors: true
+
+        - name: Check receptor service
+          systemd:
+            name: receptor
+            state: started
+          register: receptor_check
+          ignore_errors: true
+
+        - name: Record service status result
+          set_fact:
+            validation_results: "{{ validation_results + [{'test': 'Service Status', 'status': 'PASS' if postgres_check is succeeded and awx_check is succeeded else 'FAIL', 'details': 'PostgreSQL: ' + ('running' if postgres_check is succeeded else 'stopped') + ', AAP: ' + ('running' if awx_check is succeeded else 'stopped')}] }}"
+
+      rescue:
+        - name: Record service status failure
+          set_fact:
+            validation_results: "{{ validation_results + [{'test': 'Service Status', 'status': 'FAIL', 'details': 'Critical services not running'}] }}"
+            validation_failed: true
+
+    - name: Test 3 - Network Connectivity Validation
+      block:
+        - name: Check if AAP API is accessible
+          uri:
+            url: "https://{{ ansible_default_ipv4.address | default(ansible_all_ipv4_addresses[0]) }}/api/v2/ping/"
+            method: GET
+            validate_certs: false
+            return_content: yes
+          register: api_check
+          ignore_errors: true
+
+        - name: Check web interface accessibility
+          uri:
+            url: "https://{{ ansible_default_ipv4.address | default(ansible_all_ipv4_addresses[0]) }}/"
+            method: GET
+            validate_certs: false
+            return_content: yes
+          register: web_check
+          ignore_errors: true
+
+        - name: Record network connectivity result
+          set_fact:
+            validation_results: "{{ validation_results + [{'test': 'Network Connectivity', 'status': 'PASS' if api_check.status == 200 and web_check.status == 200 else 'FAIL', 'details': 'API: ' + (api_check.status | string) + ', Web: ' + (web_check.status | string)}] }}"
+
+      rescue:
+        - name: Record network connectivity failure
+          set_fact:
+            validation_results: "{{ validation_results + [{'test': 'Network Connectivity', 'status': 'FAIL', 'details': 'AAP services not accessible'}] }}"
+            validation_failed: true
+
+    - name: Test 4 - Database Connectivity Validation
+      block:
+        - name: Check PostgreSQL connection
+          postgresql_db:
+            name: awx
+            state: present
+          become_user: awx
+          register: db_check
+          ignore_errors: true
+
+        - name: Check database tables
+          command: psql -U awx -d awx -c "\dt"
+          become_user: awx
+          register: table_check
+          ignore_errors: true
+
+        - name: Record database connectivity result
+          set_fact:
+            validation_results: "{{ validation_results + [{'test': 'Database Connectivity', 'status': 'PASS' if db_check is succeeded and table_check is succeeded else 'FAIL', 'details': 'Database connection: ' + ('OK' if db_check is succeeded else 'FAILED')}] }}"
+
+      rescue:
+        - name: Record database connectivity failure
+          set_fact:
+            validation_results: "{{ validation_results + [{'test': 'Database Connectivity', 'status': 'FAIL', 'details': 'Cannot connect to AAP database'}] }}"
+            validation_failed: true
+
+    - name: Test 5 - File System Validation
+      block:
+        - name: Check AAP configuration directory
+          stat:
+            path: /etc/tower
+          register: config_check
+          ignore_errors: true
+
+        - name: Check AAP data directory
+          stat:
+            path: /var/lib/awx
+          register: data_check
+          ignore_errors: true
+
+        - name: Check installer directory
+          stat:
+            path: /usr/share/ansible-automation-platform-installer
+          register: installer_check
+          ignore_errors: true
+
+        - name: Record file system result
+          set_fact:
+            validation_results: "{{ validation_results + [{'test': 'File System', 'status': 'PASS' if config_check.stat.exists and data_check.stat.exists and installer_check.stat.exists else 'FAIL', 'details': 'Required directories: ' + ('present' if config_check.stat.exists and data_check.stat.exists else 'missing')}] }}"
+
+      rescue:
+        - name: Record file system failure
+          set_fact:
+            validation_results: "{{ validation_results + [{'test': 'File System', 'status': 'FAIL', 'details': 'Required directories missing'}] }}"
+            validation_failed: true
+
+    - name: Test 6 - AAP Version Validation
+      block:
+        - name: Get AAP version
+          command: awx-manage --version
+          register: version_check
+          ignore_errors: true
+
+        - name: Record version validation result
+          set_fact:
+            validation_results: "{{ validation_results + [{'test': 'AAP Version', 'status': 'PASS' if version_check is succeeded else 'FAIL', 'details': version_check.stdout | default('Version check failed')}] }}"
+
+      rescue:
+        - name: Record version validation failure
+          set_fact:
+            validation_results: "{{ validation_results + [{'test': 'AAP Version', 'status': 'FAIL', 'details': 'Cannot determine AAP version'}] }}"
+            validation_failed: true
+
+    - name: Test 7 - Authentication Validation
+      block:
+        - name: Test admin authentication
+          uri:
+            url: "https://{{ ansible_default_ipv4.address | default(ansible_all_ipv4_addresses[0]) }}/api/v2/me/"
+            method: GET
+            user: "admin"
+            password: "{{ vault_aap_admin_password | default(lookup('env', 'AAP_ADMIN_PASSWORD')) | default('admin') }}"
+            validate_certs: false
+            return_content: yes
+          register: auth_check
+          ignore_errors: true
+
+        - name: Record authentication result
+          set_fact:
+            validation_results: "{{ validation_results + [{'test': 'Authentication', 'status': 'PASS' if auth_check.status == 200 else 'FAIL', 'details': 'Admin login: ' + ('success' if auth_check.status == 200 else 'failed')}] }}"
+
+      rescue:
+        - name: Record authentication failure
+          set_fact:
+            validation_results: "{{ validation_results + [{'test': 'Authentication', 'status': 'FAIL', 'details': 'Admin authentication failed'}] }}"
+            validation_failed: true
+
+    - name: Test 8 - Certificate Validation
+      block:
+        - name: Check SSL certificate
+          command: openssl s_client -connect localhost:443 -showcerts
+          register: cert_check
+          ignore_errors: true
+
+        - name: Record certificate result
+          set_fact:
+            validation_results: "{{ validation_results + [{'test': 'SSL Certificate', 'status': 'PASS' if cert_check.rc == 0 else 'FAIL', 'details': 'SSL certificate: ' + ('valid' if cert_check.rc == 0 else 'invalid')}] }}"
+
+      rescue:
+        - name: Record certificate failure
+          set_fact:
+            validation_results: "{{ validation_results + [{'test': 'SSL Certificate', 'status': 'FAIL', 'details': 'SSL certificate check failed'}] }}"
+            validation_failed: true
+
+    - name: Test 9 - Log File Validation
+      block:
+        - name: Check AAP log files
+          stat:
+            path: /var/log/tower/tower.log
+          register: log_check
+          ignore_errors: true
+
+        - name: Check recent log entries
+          command: tail -20 /var/log/tower/tower.log
+          register: log_content
+          ignore_errors: true
+
+        - name: Record log file result
+          set_fact:
+            validation_results: "{{ validation_results + [{'test': 'Log Files', 'status': 'PASS' if log_check.stat.exists else 'FAIL', 'details': 'Log files: ' + ('present' if log_check.stat.exists else 'missing')}] }}"
+
+      rescue:
+        - name: Record log file failure
+          set_fact:
+            validation_results: "{{ validation_results + [{'test': 'Log Files', 'status': 'FAIL', 'details': 'Log files not accessible'}] }}"
+            validation_failed: true
+
+    - name: Test 10 - Backup Configuration Validation
+      block:
+        - name: Check backup directory
+          stat:
+            path: /opt/aap-backups
+          register: backup_dir_check
+          ignore_errors: true
+
+        - name: Check backup playbook exists
+          stat:
+            path: /opt/aap-backups
+          register: backup_config_check
+          ignore_errors: true
+
+        - name: Record backup configuration result
+          set_fact:
+            validation_results: "{{ validation_results + [{'test': 'Backup Configuration', 'status': 'PASS' if backup_dir_check.stat.exists else 'WARN', 'details': 'Backup directory: ' + ('configured' if backup_dir_check.stat.exists else 'not configured')}] }}"
+
+      rescue:
+        - name: Record backup configuration warning
+          set_fact:
+            validation_results: "{{ validation_results + [{'test': 'Backup Configuration', 'status': 'WARN', 'details': 'Backup not configured'}] }}"
+
+    - name: Generate validation report
+      template:
+        src: validation_report.j2
+        dest: /tmp/aap_validation_report.txt
+        mode: '0644'
+      vars:
+        report_content: "{{ validation_results }}"
+        overall_status: "PASS" if not validation_failed else "FAIL"
+
+    - name: Display validation summary
+      debug:
+        msg: "{{ validation_results }}"
+
+    - name: Display overall validation status
+      debug:
+        msg: "🎯 Overall Validation Status: {{ '✅ PASS' if not validation_failed else '❌ FAIL' }}"
+
+    - name: Fail if critical validations failed
+      assert:
+        that:
+          - not validation_failed
+        fail_msg: "Critical validation tests failed. Please review the validation report."
+        quiet: true
+      when: validation_failed

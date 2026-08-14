@@ -1,0 +1,49 @@
+AAP Installation Validation Report
+====================================
+
+Generated: {{ ansible_date_time.iso8601 }}
+Host: {{ ansible_hostname }}
+IP Address: {{ ansible_default_ipv4.address | default(ansible_all_ipv4_addresses[0]) }}
+Overall Status: {{ overall_status }}
+
+Test Results:
+------------
+{% for result in report %}
+[{{ result.status }}] {{ result.test }}
+Details: {{ result.details }}
+{% endfor %}
+
+Summary:
+--------
+Total Tests: {{ report | length }}
+Passed: {{ report | selectattr('status', 'equalto', 'PASS') | list | length }}
+Failed: {{ report | selectattr('status', 'equalto', 'FAIL') | list | length }}
+Warnings: {{ report | selectattr('status', 'equalto', 'WARN') | list | length }}
+
+System Information:
+------------------
+OS: {{ ansible_distribution }} {{ ansible_distribution_version }}
+CPU: {{ ansible_facts['processor_vcpus'] }} cores
+Memory: {{ (ansible_facts['memtotal_mb'] / 1024) | round(1) }} GB
+Disk: {{ ansible_mounts | selectattr('mount', 'equalto', '/') | map(attribute='size_total') | first / 1024 / 1024 / 1024 | round(1) }} GB
+
+Recommendations:
+---------------
+{% if overall_status == 'FAIL' %}
+- Critical issues detected. Review failed tests and take corrective action.
+- Check service logs for detailed error information.
+- Ensure all prerequisites are met.
+{% else %}
+- All critical tests passed. System is operational.
+- Review any warnings and address if needed.
+- Regular monitoring and maintenance recommended.
+{% endif %}
+
+Next Steps:
+----------
+- Review detailed test results above
+- Address any failed or warning items
+- Run regular validations to monitor system health
+- Set up automated monitoring and alerting
+
+Report Location: /tmp/aap_validation_report.txt

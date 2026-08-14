@@ -1,0 +1,12 @@
+---
+# Example vault file for AAP installation
+# Copy this to vault.yml and encrypt it with: ansible-vault encrypt vault.yml
+# Then run playbook with: ansible-playbook -i inventory install_aap.yml --ask-vault-pass
+
+# Red Hat Portal Registration Credentials
+vault_rh_username: "your_redhat_username"
+vault_rh_password: "your_redhat_password"
+
+# AAP Platform Configuration
+vault_aap_admin_password: "your_secure_admin_password"
+vault_aap_db_password: "your_secure_db_password"

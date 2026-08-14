@@ -1,0 +1,118 @@
+---
+- name: Backup Ansible Automation Platform
+  hosts: all
+  become: true
+  gather_facts: true
+
+  vars:
+    backup_dir: "/opt/aap-backups"
+    backup_date: "{{ ansible_date_time.iso8601_basic_short }}"
+    retention_days: 7
+
+  tasks:
+    - name: Create backup directory
+      file:
+        path: "{{ backup_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Create timestamped backup subdirectory
+      file:
+        path: "{{ backup_dir }}/{{ backup_date }}"
+        state: directory
+        mode: '0755'
+
+    - name: Backup PostgreSQL database
+      postgresql_db:
+        name: awx
+        state: dump
+        target: "{{ backup_dir }}/{{ backup_date }}/awx_db_backup.sql"
+      become_user: awx
+      when: ansible_facts['services']['postgresql.service'] is defined
+      register: db_backup
+      ignore_errors: true
+
+    - name: Alert on database backup failure
+      debug:
+        msg: "WARNING: Database backup failed. Proceeding with other backup components."
+      when: db_backup is failed
+
+    - name: Backup AAP configuration files
+      archive:
+        path:
+          - /etc/tower/
+          - /var/lib/awx/
+          - /etc/ansible-automation-platform/
+        dest: "{{ backup_dir }}/{{ backup_date }}/aap_config_backup.tar.gz"
+        mode: '0644'
+      register: config_backup
+      ignore_errors: true
+
+    - name: Alert on configuration backup failure
+      debug:
+        msg: "WARNING: Configuration backup failed. Some files may not be included."
+      when: config_backup is failed
+
+    - name: Backup custom EE images and projects
+      archive:
+        path:
+          - /var/lib/awx/projects/
+          - /var/lib/awx/ee/
+        dest: "{{ backup_dir }}/{{ backup_date }}/aap_custom_content.tar.gz"
+        mode: '0644'
+
+    - name: Backup secrets
+      shell: |
+        awx-manage export_settings --indent 2 > {{ backup_dir }}/{{ backup_date }}/aap_settings.json
+      args:
+        chdir: /var/lib/awx
+      when: ansible_facts['services']['awx.service'] is defined
+
+    - name: Generate backup manifest
+      copy:
+        content: |
+          AAP Backup Manifest
+          ===================
+          Date: {{ backup_date }}
+          Host: {{ ansible_hostname }}
+          AAP Version: {{ ansible_facts['packages']['ansible-automation-platform-installer'].version | default('unknown') }}
+          
+          Backup Contents:
+          - Database: {{ backup_dir }}/{{ backup_date }}/awx_db_backup.sql
+          - Configuration: {{ backup_dir }}/{{ backup_date }}/aap_config_backup.tar.gz
+          - Custom Content: {{ backup_dir }}/{{ backup_date }}/aap_custom_content.tar.gz
+          - Settings: {{ backup_dir }}/{{ backup_date }}/aap_settings.json
+          
+          Restoration Instructions:
+          See restore_aap.yml playbook
+        dest: "{{ backup_dir }}/{{ backup_date }}/MANIFEST.txt"
+        mode: '0644'
+
+    - name: Clean up old backups (retention policy)
+      find:
+        paths: "{{ backup_dir }}"
+        age: "{{ retention_days }}d"
+        file_type: directory
+      register: old_backups
+
+    - name: Remove old backup directories
+      file:
+        path: "{{ item.path }}"
+        state: absent
+      loop: "{{ old_backups.files }}"
+      when: old_backups.matched > 0
+
+    - name: Display backup completion status
+      debug:
+        msg: "Backup completed successfully! Location: {{ backup_dir }}/{{ backup_date }}"
+
+    - name: Upload backup to Azure Storage (optional)
+      azure.azcollection.azure_rm_storageblob:
+        resource_group: "{{ azure_resource_group | default('rg-ansible-automation-platform') }}"
+        storage_account_name: "{{ azure_storage_account | default('aapbackups') }}"
+        container: "{{ azure_container | default('aap-backups') }}"
+        blob_type: block
+        src: "{{ backup_dir }}/{{ backup_date }}/aap_config_backup.tar.gz"
+        name: "aap-backup-{{ backup_date }}.tar.gz"
+      when: azure_backup_enabled | default(false)
+      ignore_errors: true

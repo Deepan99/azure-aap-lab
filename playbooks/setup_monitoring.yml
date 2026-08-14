@@ -1,0 +1,344 @@
+---
+- name: Setup Monitoring and Logging for AAP
+  hosts: all
+  become: true
+  gather_facts: true
+
+  vars:
+    monitoring_enabled: true
+    log_retention_days: 30
+    install_azure_monitor: false
+    install_prometheus: false
+    install_grafana: false
+
+  tasks:
+    - name: Install monitoring dependencies
+      dnf:
+        name:
+          - python3-prometheus-client
+          - python3-psutil
+          - net-snmp
+          - rsyslog
+        state: present
+        update_cache: true
+
+    - name: Configure AAP enhanced logging
+      copy:
+        content: |
+          # AAP Enhanced Logging Configuration
+          # File: /etc/tower/conf.d/logging.py
+
+          LOGGING = {
+              'version': 1,
+              'disable_existing_loggers': False,
+              'formatters': {
+                  'verbose': {
+                      'format': '{levelname} {asctime} {module} {process:d} {thread:d} {message}',
+                      'style': '{',
+                  },
+                  'simple': {
+                      'format': '{levelname} {message}',
+                      'style': '{',
+                  },
+              },
+              'handlers': {
+                  'console': {
+                      'class': 'logging.StreamHandler',
+                      'formatter': 'verbose',
+                  },
+                  'file': {
+                      'class': 'logging.handlers.RotatingFileHandler',
+                      'filename': '/var/log/tower/tower.log',
+                      'maxBytes': 1024*1024*100,  # 100MB
+                      'backupCount': 5,
+                      'formatter': 'verbose',
+                  },
+              },
+              'loggers': {
+                  'django': {
+                      'handlers': ['console', 'file'],
+                      'level': 'INFO',
+                      'propagate': False,
+                  },
+                  'awx': {
+                      'handlers': ['console', 'file'],
+                      'level': 'INFO',
+                      'propagate': False,
+                  },
+              },
+          }
+        dest: /etc/tower/conf.d/logging.py
+        mode: '0644'
+      notify: Restart AAP services
+
+    - name: Configure log rotation for AAP logs
+      copy:
+        content: |
+          /var/log/tower/*.log {
+              daily
+              rotate {{ log_retention_days }}
+              compress
+              delaycompress
+              missingok
+              notifempty
+              create 0644 awx awx
+              sharedscripts
+              postrotate
+                  systemctl reload awx > /dev/null 2>&1 || true
+              endscript
+          }
+          
+          /var/log/awx/*.log {
+              daily
+              rotate {{ log_retention_days }}
+              compress
+              delaycompress
+              missingok
+              notifempty
+              create 0644 awx awx
+          }
+        dest: /etc/logrotate.d/aap
+        mode: '0644'
+
+    - name: Setup system monitoring with Prometheus exporter
+      copy:
+        content: |
+          # AAP Metrics Exporter
+          # Exposes AAP and system metrics for Prometheus
+          
+          import psutil
+          from prometheus_client import start_http_server, Gauge
+          import time
+          import subprocess
+          
+          # System metrics
+          cpu_gauge = Gauge('aap_system_cpu_percent', 'CPU usage percentage')
+          memory_gauge = Gauge('aap_system_memory_percent', 'Memory usage percentage')
+          disk_gauge = Gauge('aap_system_disk_percent', 'Disk usage percentage')
+          
+          # AAP process metrics
+          aap_processes = Gauge('aap_processes_count', 'Number of AAP processes running')
+          
+          def get_aap_processes():
+              try:
+                  result = subprocess.run(['pgrep', '-f', 'awx'], capture_output=True, text=True)
+                  return len(result.stdout.splitlines()) if result.returncode == 0 else 0
+              except:
+                  return 0
+          
+          def collect_metrics():
+              cpu_gauge.set(psutil.cpu_percent(interval=1))
+              memory_gauge.set(psutil.virtual_memory().percent)
+              disk_gauge.set(psutil.disk_usage('/').percent)
+              aap_processes.set(get_aap_processes())
+          
+          if __name__ == '__main__':
+              start_http_server(9100)
+              print("Prometheus exporter started on port 9100")
+              while True:
+                  collect_metrics()
+                  time.sleep(60)
+        dest: /usr/local/bin/aap_metrics_exporter.py
+        mode: '0755'
+
+    - name: Create systemd service for metrics exporter
+      copy:
+        content: |
+          [Unit]
+          Description=AAP Metrics Exporter
+          After=network.target awx.service
+          
+          [Service]
+          Type=simple
+          User=root
+          ExecStart=/usr/bin/python3 /usr/local/bin/aap_metrics_exporter.py
+          Restart=always
+          RestartSec=10
+          
+          [Install]
+          WantedBy=multi-user.target
+        dest: /etc/systemd/system/aap-metrics-exporter.service
+        mode: '0644'
+
+    - name: Enable and start metrics exporter
+      systemd:
+        name: aap-metrics-exporter
+        state: started
+        enabled: true
+      when: monitoring_enabled
+
+    - name: Configure Azure Monitor integration (optional)
+      block:
+        - name: Install Azure Monitor agent
+          dnf:
+            name: azure-monitor-agent
+            state: present
+          
+        - name: Configure Azure Monitor
+          copy:
+            content: |
+              # Azure Monitor Configuration
+              # Requires Azure Monitor workspace and agent setup
+              
+              [azure_monitor]
+              enabled = true
+              workspace_id = {{ azure_workspace_id | default('WORKSPACE_ID') }}
+              shared_key = {{ azure_shared_key | default('SHARED_KEY') }}
+              
+              [log_collection]
+              collect_syslog = true
+              collect_files = true
+              log_paths = 
+                  /var/log/tower/
+                  /var/log/awx/
+                  /var/log/messages
+            dest: /etc/azure-monitor/agent-config.yaml
+            mode: '0600'
+          notify: Restart Azure Monitor Agent
+
+      when: install_azure_monitor
+
+    - name: Install Prometheus (optional)
+      block:
+        - name: Install Prometheus
+          dnf:
+            name: prometheus
+            state: present
+          
+        - name: Configure Prometheus to scrape AAP metrics
+          copy:
+            content: |
+              global:
+                scrape_interval: 15s
+              
+              scrape_configs:
+                - job_name: 'aap_metrics'
+                  static_configs:
+                    - targets: ['localhost:9100']
+                    labels:
+                      instance: 'aap-controller'
+            dest: /etc/prometheus/prometheus.yml
+            mode: '0644'
+          notify: Restart Prometheus
+
+      when: install_prometheus
+
+    - name: Install Grafana (optional)
+      block:
+        - name: Install Grafana
+          dnf:
+            name: grafana
+            state: present
+          
+        - name: Start Grafana service
+          systemd:
+            name: grafana-server
+            state: started
+            enabled: true
+      when: install_grafana
+
+    - name: Setup health check monitoring
+      copy:
+        content: |
+          #!/bin/bash
+          # AAP Health Check Script
+          # Run this script to monitor AAP health status
+          
+          # AAP API endpoint
+          AAP_API="https://localhost/api/v2/ping/"
+          
+          # Check AAP API
+          check_aap_api() {
+              response=$(curl -k -s -o /dev/null -w "%{http_code}" $AAP_API)
+              if [ $response -eq 200 ]; then
+                  echo "✓ AAP API is healthy"
+                  return 0
+              else
+                  echo "✗ AAP API is unhealthy (HTTP $response)"
+                  return 1
+              fi
+          }
+          
+          # Check PostgreSQL
+          check_postgresql() {
+              systemctl is-active --quiet postgresql
+              if [ $? -eq 0 ]; then
+                  echo "✓ PostgreSQL is running"
+                  return 0
+              else
+                  echo "✗ PostgreSQL is not running"
+                  return 1
+              fi
+          }
+          
+          # Check AAP service
+          check_aap_service() {
+              systemctl is-active --quiet awx
+              if [ $? -eq 0 ]; then
+                  echo "✓ AAP service is running"
+                  return 0
+              else
+                  echo "✗ AAP service is not running"
+                  return 1
+              fi
+          }
+          
+          # Check disk space
+          check_disk_space() {
+              disk_usage=$(df / | tail -1 | awk '{print $5}' | sed 's/%//')
+              if [ $disk_usage -lt 80 ]; then
+                  echo "✓ Disk space is OK (${disk_usage}% used)"
+                  return 0
+              else
+                  echo "✗ Disk space is critically high (${disk_usage}% used)"
+                  return 1
+              fi
+          }
+          
+          # Main health check
+          echo "AAP Health Check - $(date)"
+          echo "=========================="
+          
+          overall_health=0
+          check_aap_api || overall_health=1
+          check_postgresql || overall_health=1
+          check_aap_service || overall_health=1
+          check_disk_space || overall_health=1
+          
+          echo "=========================="
+          if [ $overall_health -eq 0 ]; then
+              echo "Overall Health: HEALTHY"
+              exit 0
+          else
+              echo "Overall Health: UNHEALTHY"
+              exit 1
+          fi
+        dest: /usr/local/bin/aap_health_check.sh
+        mode: '0755'
+
+    - name: Setup automated health checks with cron
+      cron:
+        name: "AAP Health Check"
+        minute: "*/5"
+        job: "/usr/local/bin/aap_health_check.sh >> /var/log/aap_health_check.log 2>&1"
+        user: root
+
+    - name: Display monitoring setup completion
+      debug:
+        msg: "Monitoring and logging setup completed successfully. Metrics available at http://localhost:9100/metrics"
+
+  handlers:
+    - name: Restart AAP services
+      systemd:
+        name: awx
+        state: restarted
+
+    - name: Restart Azure Monitor Agent
+      systemd:
+        name: azure-monitor-agent
+        state: restarted
+
+    - name: Restart Prometheus
+      systemd:
+        name: prometheus
+        state: restarted

@@ -6,13 +6,13 @@
 
   vars:
     # Red Hat Portal Registration Credentials
-    rh_username: "deeepan91"
-    rh_password: "cN?Sx7Bq*pMU#iX"
+    rh_username: "{{ vault_rh_username | default(lookup('env', 'RH_USERNAME')) }}"
+    rh_password: "{{ vault_rh_password | default(lookup('env', 'RH_PASSWORD')) }}"
     
     # AAP Platform Configuration
     aap_version: "2.4"
-    aap_admin_password: "AdminSecurePassword123!"
-    aap_db_password: "DbSecurePassword123!"
+    aap_admin_password: "{{ vault_aap_admin_password | default(lookup('env', 'AAP_ADMIN_PASSWORD')) }}"
+    aap_db_password: "{{ vault_aap_db_password | default(lookup('env', 'AAP_DB_PASSWORD')) }}"
     
     # Paths
     installer_dir: "/opt/ansible-automation-platform/installer"
@@ -54,6 +54,36 @@
           - ansible-automation-platform-installer
         state: present
         update_cache: true
+      register: package_install
+      ignore_errors: true
+
+    - name: Alert on package installation failure
+      debug:
+        msg: "WARNING: Some packages failed to install. This may affect AAP installation."
+      when: package_install is failed
+
+    - name: Retry package installation with error handling
+      dnf:
+        name:
+          - tar
+          - wget
+          - python3
+          - python3-pip
+          - git
+          - ansible-automation-platform-installer
+        state: present
+        update_cache: true
+      register: package_install_retry
+      when: package_install is failed
+      ignore_errors: true
+
+    - name: Fail on persistent package installation failure
+      assert:
+        that:
+          - package_install is succeeded or package_install_retry is succeeded
+        fail_msg: "Failed to install required packages. Please check your network connectivity and repository access."
+        quiet: true
+      when: package_install is failed and package_install_retry is failed
 
     # ----------------------------------------------------
     # 3. Create the Installer Inventory File
@@ -107,6 +137,69 @@
       register: install_result
       async: 1800  # Give it up to 30 minutes to install
       poll: 30     # Check status every 30 seconds
+      ignore_errors: true
+
+    - name: Alert on installation failure
+      debug:
+        msg: "WARNING: AAP installation failed. Check installer logs for details."
+      when: install_result is failed
+
+    - name: Check installer logs for common errors
+      shell: |
+        if [ -f /tmp/ansible-local-*/setup.log ]; then
+          tail -50 /tmp/ansible-local-*/setup.log
+        else
+          echo "Installer logs not found"
+        fi
+      register: installer_logs
+      when: install_result is failed
+      ignore_errors: true
+
+    - name: Display installer error information
+      debug:
+        msg: "{{ installer_logs.stdout_lines }}"
+      when: install_result is failed and installer_logs.stdout_lines is defined
+
+    - name: Fail on installation failure
+      assert:
+        that:
+          - install_result is succeeded
+        fail_msg: "AAP installation failed. Please review the installer logs and check system requirements."
+        quiet: true
+      when: install_result is failed
+
+    - name: Wait for AAP services to be ready
+      uri:
+        url: "https://{{ ansible_default_ipv4.address | default(ansible_all_ipv4_addresses[0]) }}/api/v2/ping/"
+        method: GET
+        validate_certs: false
+        return_content: yes
+      register: aap_ping
+      until: aap_ping.status == 200
+      retries: 30
+      delay: 10
+      timeout: 300
+
+    - name: Check AAP web interface accessibility
+      uri:
+        url: "https://{{ ansible_default_ipv4.address | default(ansible_all_ipv4_addresses[0]) }}/"
+        method: GET
+        validate_certs: false
+        return_content: yes
+      register: aap_web
+      until: aap_web.status == 200
+      retries: 10
+      delay: 10
+      timeout: 120
+
+    - name: Check critical AAP services status
+      systemd:
+        name: "{{ item }}"
+        state: started
+      loop:
+        - awx
+        - postgresql
+      register: service_status
 
     - name: Output installation result
       debug:

@@ -10,7 +10,7 @@
     subnet_name: "subnet-default"
     vm_name: "vm-aap-demo"
     admin_user: "azureuser"
-    ssh_key_path: "~/.ssh/id_rsa.pub"
+    ssh_key_path: "{{ lookup('env', 'SSH_PUBLIC_KEY_PATH') | default('~/.ssh/id_rsa.pub') }}"
 
   tasks:
     - name: Create Resource Group

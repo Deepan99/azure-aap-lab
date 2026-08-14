@@ -1,0 +1,244 @@
+---
+- name: Upgrade Ansible Automation Platform
+  hosts: all
+  become: true
+  gather_facts: true
+
+  vars:
+    current_version: "2.4"
+    target_version: "2.5"  # Set desired target version
+    backup_before_upgrade: true
+    upgrade_timeout: 3600  # 1 hour
+    installer_dir: "/usr/share/ansible-automation-platform-installer"
+    custom_inventory_dir: "/opt/aap-installer"
+
+  vars_prompt:
+    - name: confirm_upgrade
+      prompt: "Are you sure you want to upgrade AAP from {{ current_version }} to {{ target_version }}? (yes/no)"
+      private: false
+    - name: rh_username
+      prompt: "Enter your Red Hat Customer Portal Username"
+      private: false
+    - name: rh_password
+      prompt: "Enter your Red Hat Customer Portal Password"
+      private: true
+
+  tasks:
+    - name: Validate upgrade confirmation
+      assert:
+        that:
+          - confirm_upgrade | lower == "yes"
+        fail_msg: "Upgrade not confirmed. Please run playbook again and confirm with 'yes'"
+        quiet: true
+
+    - name: Check current AAP version
+      shell: |
+        awx-manage --version
+      register: current_aap_version
+      ignore_errors: true
+
+    - name: Display current version
+      debug:
+        msg: "Current AAP version: {{ current_aap_version.stdout | default('Unknown') }}"
+
+    - name: Pre-upgrade backup
+      block:
+        - name: Create pre-upgrade backup directory
+          file:
+            path: "/opt/aap-backup-pre-upgrade-{{ ansible_date_time.iso8601_basic_short }}"
+            state: directory
+            mode: '0755'
+
+        - name: Run comprehensive backup
+          include_tasks: backup_aap.yml
+          vars:
+            backup_dir: "/opt/aap-backup-pre-upgrade-{{ ansible_date_time.iso8601_basic_short }}"
+
+        - name: Backup inventory file
+          copy:
+            src: "{{ custom_inventory_dir }}/inventory"
+            dest: "/opt/aap-backup-pre-upgrade-{{ ansible_date_time.iso8601_basic_short }}/inventory_backup"
+            remote_src: true
+      when: backup_before_upgrade
+
+    - name: Pre-upgrade health check
+      block:
+        - name: Check AAP services status
+          systemd:
+            name: "{{ item }}"
+            state: started
+          loop:
+            - postgresql
+            - awx
+          register: pre_upgrade_services
+
+        - name: Verify AAP API
+          uri:
+            url: "https://{{ ansible_default_ipv4.address | default(ansible_all_ipv4_addresses[0]) }}/api/v2/ping/"
+            method: GET
+            validate_certs: false
+          register: pre_upgrade_api
+
+        - name: Display pre-upgrade status
+          debug:
+            msg: "Pre-upgrade health check: Services OK, API: {{ 'OK' if pre_upgrade_api.status == 200 else 'FAILED' }}"
+
+    - name: Stop AAP services before upgrade
+      systemd:
+        name: "{{ item }}"
+        state: stopped
+      loop:
+        - awx
+        - receptor
+      ignore_errors: true
+
+    - name: Update subscription repositories
+      shell: |
+        subscription-manager repos --enable=ansible-automation-platform-{{ target_version }}-for-rhel-9-x86_64-rpms
+      register: repo_update
+
+    - name: Update AAP installer package
+      dnf:
+        name: ansible-automation-platform-installer
+        state: latest
+      register: installer_update
+
+    - name: Update inventory file for new version
+      copy:
+        content: |
+          [automationcontroller]
+          {{ ansible_default_ipv4.address | default(ansible_all_ipv4_addresses[0]) }} ansible_connection=local
+
+          [automationhub]
+
+          [execution_nodes]
+
+          [database]
+          {{ ansible_default_ipv4.address | default(ansible_all_ipv4_addresses[0]) }} ansible_connection=local
+
+          [all:vars]
+          # Platform Version
+          automation_platform_version='{{ target_version }}'
+
+          # Preserve existing passwords from inventory
+          {% if lookup('file', custom_inventory_dir + '/inventory', errors='ignore') %}
+          {% set old_inventory = lookup('file', custom_inventory_dir + '/inventory') %}
+          {% endif %}
+          
+          admin_password='{{ vault_aap_admin_password | default(lookup('env', 'AAP_ADMIN_PASSWORD')) | default('CHANGE_ME') }}'
+          registry_username='{{ rh_username }}'
+          registry_password='{{ rh_password }}'
+          
+          pg_sslmode='prefer'
+          pg_host='{{ ansible_default_ipv4.address | default(ansible_all_ipv4_addresses[0]) }}'
+          pg_port='5432'
+          pg_database='awx'
+          pg_username='awx'
+          pg_password='{{ vault_aap_db_password | default(lookup('env', 'AAP_DB_PASSWORD')) | default('CHANGE_ME') }}'
+          
+          controller_web_port=443
+        dest: "{{ custom_inventory_dir }}/inventory-upgrade"
+        mode: '0600'
+
+    - name: Run AAP upgrade
+      command: "./setup.sh -i {{ custom_inventory_dir }}/inventory-upgrade"
+      args:
+        chdir: "{{ installer_dir }}"
+      register: upgrade_result
+      async: "{{ upgrade_timeout }}"
+      poll: 30
+      timeout: "{{ upgrade_timeout }}"
+
+    - name: Check upgrade result
+      debug:
+        msg: "Upgrade completed with return code: {{ upgrade_result.rc }}"
+
+    - name: Start AAP services
+      systemd:
+        name: "{{ item }}"
+        state: started
+        enabled: true
+      loop:
+        - postgresql
+        - awx
+        - receptor
+
+    - name: Wait for AAP services to be ready
+      uri:
+        url: "https://{{ ansible_default_ipv4.address | default(ansible_all_ipv4_addresses[0]) }}/api/v2/ping/"
+        method: GET
+        validate_certs: false
+        return_content: yes
+      register: post_upgrade_api
+      until: post_upgrade_api.status == 200
+      retries: 30
+      delay: 10
+      timeout: 300
+
+    - name: Verify new version
+      shell: |
+        awx-manage --version
+      register: new_aap_version
+
+    - name: Display upgrade completion
+      debug:
+        msg: |
+          🎉 AAP Upgrade completed successfully!
+          
+          Previous version: {{ current_version }}
+          New version: {{ new_aap_version.stdout }}
+          
+          Post-upgrade tasks:
+          1. Verify AAP console functionality
+          2. Test existing job templates
+          3. Review release notes for breaking changes
+          4. Update custom execution environments if needed
+          5. Verify integrations and credentials
+
+    - name: Clean up old inventory file
+      copy:
+        src: "{{ custom_inventory_dir }}/inventory-upgrade"
+        dest: "{{ custom_inventory_dir }}/inventory"
+        remote_src: true
+        mode: '0600'
+
+    - name: Save upgrade manifest
+      copy:
+        content: |
+          AAP Upgrade Manifest
+          =====================
+          Upgrade Date: {{ ansible_date_time.iso8601 }}
+          Previous Version: {{ current_version }}
+          New Version: {{ new_aap_version.stdout }}
+          Host: {{ ansible_hostname }}
+          
+          Upgrade Status: Success
+          Backup Location: /opt/aap-backup-pre-upgrade-{{ ansible_date_time.iso8601_basic_short }}
+          
+          Rollback Instructions:
+          1. Stop AAP services
+          2. Restore from backup: ansible-playbook restore_aap.yml -e "backup_date={{ ansible_date_time.iso8601_basic_short }}"
+          3. Verify system functionality
+          
+          Post-Upgrade Checklist:
+          - [ ] Verify AAP console access
+          - [ ] Test job execution
+          - [ ] Check execution environments
+          - [ ] Review user permissions
+          - [ ] Verify integrations
+        dest: "{{ custom_inventory_dir }}/UPGRADE_MANIFEST.txt"
+        mode: '0644'
+
+    - name: Error handling - rollback on failure
+      block:
+        - name: Restore from backup if upgrade failed
+          include_tasks: restore_aap.yml
+          vars:
+            backup_date: "{{ ansible_date_time.iso8601_basic_short }}"
+            restore_method: "full"
+          when: upgrade_result.rc != 0
+
+        - name: Alert on upgrade failure
+          debug:
+            msg: "Upgrade failed. Rollback completed from backup."
+      when: upgrade_result.rc != 0

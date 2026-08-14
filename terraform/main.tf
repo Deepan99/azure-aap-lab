@@ -58,7 +58,7 @@ resource "azurerm_network_security_group" "nsg" {
     protocol                   = "Tcp"
     source_port_range          = "*"
     destination_port_range     = "22"
-    source_address_prefix      = "*" # In production, restrict to your public IP
+    source_address_prefix      = var.allowed_ssh_source_ip
     destination_address_prefix = "*"
   }
 
