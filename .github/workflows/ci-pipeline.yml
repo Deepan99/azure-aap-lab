@@ -2,14 +2,16 @@ name: CI/CD Pipeline
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [main, develop]
   pull_request:
-    branches: [ main ]
+    branches: [main]
   workflow_dispatch:
 
 env:
   TERRAFORM_VERSION: '1.5.0'
-  ANSIBLE_VERSION: '2.9.0'
+  # ansible-core version; ansible-lint and the collections used by the
+  # playbooks require a supported release.
+  ANSIBLE_VERSION: '2.16.14'
 
 jobs:
   validate-terraform:
@@ -61,12 +63,15 @@ jobs:
 
       - name: Install Ansible
         run: |
-          pip install ansible==${{ env.ANSIBLE_VERSION }}
-          pip install ansible-lint
-          pip install yamllint
+          set -euo pipefail
+          pip install "ansible-core==${{ env.ANSIBLE_VERSION }}" ansible-lint yamllint
+
+      - name: Install Ansible Collections
+        run: ansible-galaxy collection install -r collections/requirements.yml
 
       - name: Ansible Syntax Check
         run: |
+          set -euo pipefail
           for playbook in playbooks/*.yml; do
             if [[ "$playbook" != "playbooks/azure_dynamic_inventory.yml" ]]; then
               ansible-playbook --syntax-check "$playbook"
@@ -75,36 +80,13 @@ jobs:
           ansible-playbook --syntax-check ansible/*.yml
 
       - name: Ansible Lint
-        run: |
-          for playbook in playbooks/*.yml; do
-            if [[ "$playbook" != "playbooks/azure_dynamic_inventory.yml" ]]; then
-              ansible-lint "$playbook" || true
-            fi
-          done
-          ansible-lint ansible/*.yml || true
-        continue-on-error: true
+        run: ansible-lint playbooks/ ansible/
 
       - name: YAML Lint
-        run: |
-          yamllint -c .yamllint playbooks/ ansible/ terraform/
-        continue-on-error: true
+        run: yamllint -c .yamllint playbooks/ ansible/ terraform/ .github/
 
-      - name: Check for Security Issues
-        run: |
-          grep -r "password:" playbooks/ ansible/ || true
-          if grep -r "password.*:" playbooks/ ansible/ | grep -v "vault_" | grep -v "lookup"; then
-            echo "WARNING: Potential hardcoded passwords found"
-            exit 1
-          fi
-        continue-on-error: true
-
-      - name: Check for Secret Tokens
-        run: |
-          if grep -rE "(api_key|secret_key|access_token|private_key)" playbooks/ ansible/ | grep -v "vault_" | grep -v "lookup"; then
-            echo "WARNING: Potential secret tokens found"
-            exit 1
-          fi
-        continue-on-error: true
+      - name: Check for Hardcoded Credentials
+        run: ./scripts/check_hardcoded_secrets.sh playbooks ansible
 
   security-scan:
     name: Security Scanning
@@ -171,15 +153,22 @@ jobs:
           pip install safety
           pip install bandit
 
+      # These scanners exit non-zero when they find issues, which must fail the
+      # job; only a missing report (tool crash) is reported separately so the
+      # upload step below still has something to attach.
       - name: Run Safety Check
         run: |
-          safety check --json > safety-report.json || true
-          cat safety-report.json || true
+          set -o pipefail
+          if ! safety check --json --output safety-report.json; then
+            if [[ -s safety-report.json ]]; then
+              echo "::error::safety reported vulnerable dependencies, see the uploaded report"
+              exit 1
+            fi
+            echo "::warning::safety could not produce a report (see log above)"
+          fi
 
       - name: Run Bandit Security Check
-        run: |
-          bandit -r playbooks/ ansible/ -f json -o bandit-report.json || true
-          cat bandit-report.json || true
+        run: bandit -r playbooks/ ansible/ -f json -o bandit-report.json
 
       - name: Upload Security Reports
         uses: actions/upload-artifact@v4
@@ -207,7 +196,6 @@ jobs:
 
       - name: Lint Markdown Files
         run: markdownlint '**/*.md' --ignore node_modules
-        continue-on-error: true
 
   integration-test:
     name: Integration Tests
@@ -220,27 +208,30 @@ jobs:
 
       - name: Setup Test Environment
         run: |
+          set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y python3-pip python3-venv
-        continue-on-error: true
 
       - name: Create Test Environment
         run: |
+          set -euo pipefail
           python3 -m venv test_env
           source test_env/bin/activate
-          pip install ansible==${{ env.ANSIBLE_VERSION }}
-          pip install pytest-testinfra
-        continue-on-error: true
+          pip install "ansible-core==${{ env.ANSIBLE_VERSION }}" pytest-testinfra
+          ansible-galaxy collection install -r collections/requirements.yml
 
+      # Real checks only: a step that prints "PASSED" unconditionally hides
+      # regressions, so the playbooks are actually parsed here.
       - name: Run Validation Tests
         run: |
+          set -euo pipefail
           source test_env/bin/activate
-          # Mock validation tests (would need actual test infrastructure)
-          echo "Running integration tests..."
-          echo "Test 1: Terraform validation - PASSED"
-          echo "Test 2: Ansible syntax - PASSED"
-          echo "Test 3: Security checks - PASSED"
-        continue-on-error: true
+          for playbook in playbooks/*.yml; do
+            if [[ "$playbook" != "playbooks/azure_dynamic_inventory.yml" ]]; then
+              ansible-playbook --syntax-check "$playbook"
+            fi
+          done
+          ansible-playbook --syntax-check ansible/*.yml
 
   deploy:
     name: Deploy to Azure

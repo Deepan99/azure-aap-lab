@@ -1,0 +1,13 @@
+---
+# ansible-lint runs as a blocking CI gate so that real problems (ignored
+# errors, unsafe permissions, bad module args) cannot be merged unnoticed.
+exclude_paths:
+  - playbooks/azure_dynamic_inventory.yml  # inventory plugin config, not a playbook
+  - collections/
+
+skip_list:
+  # Repo-wide stylistic migrations that are tracked separately and would
+  # otherwise drown out actionable findings.
+  - fqcn
+  - jinja[spacing]
+  - name[casing]

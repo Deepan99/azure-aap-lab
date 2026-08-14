@@ -1,0 +1,174 @@
+---
+# Backup task list, shared by backup_aap.yml and upgrade_aap.yml.
+#
+# Each component is allowed to fail so the remaining components are still
+# attempted, but every failure is collected in `backup_failures` and the task
+# list fails at the end. A backup must never report success when part of it
+# is missing.
+#
+# Expected variables: backup_dir, backup_date, retention_days
+
+- name: Initialise backup failure list
+  ansible.builtin.set_fact:
+    backup_failures: []
+
+- name: Gather service facts
+  ansible.builtin.service_facts:
+
+- name: Gather package facts
+  ansible.builtin.package_facts:
+    manager: auto
+
+- name: Create timestamped backup directory
+  ansible.builtin.file:
+    path: "{{ backup_dir }}/{{ backup_date }}"
+    state: directory
+    mode: '0750'
+
+- name: Backup PostgreSQL database
+  community.postgresql.postgresql_db:
+    name: awx
+    state: dump
+    target: "{{ backup_dir }}/{{ backup_date }}/awx_db_backup.sql"
+  become: true
+  become_user: awx
+  when: ansible_facts['services']['postgresql.service'] is defined
+  register: db_backup
+  ignore_errors: true
+
+- name: Record database backup failure
+  ansible.builtin.set_fact:
+    backup_failures: >-
+      {{ backup_failures + ['database dump: ' ~ (db_backup.msg | default('failed'))] }}
+  when: db_backup is failed
+
+- name: Record skipped database backup
+  ansible.builtin.set_fact:
+    backup_failures: >-
+      {{ backup_failures + ['database dump: postgresql.service not found on this host'] }}
+  when: db_backup is skipped
+
+- name: Backup AAP configuration files
+  community.general.archive:
+    path:
+      - /etc/tower/
+      - /var/lib/awx/
+      - /etc/ansible-automation-platform/
+    dest: "{{ backup_dir }}/{{ backup_date }}/aap_config_backup.tar.gz"
+    mode: '0640'
+  register: config_backup
+  ignore_errors: true
+
+- name: Record configuration backup failure
+  ansible.builtin.set_fact:
+    backup_failures: >-
+      {{ backup_failures + ['configuration archive: ' ~ (config_backup.msg | default('failed'))] }}
+  when: config_backup is failed
+
+- name: Backup custom EE images and projects
+  community.general.archive:
+    path:
+      - /var/lib/awx/projects/
+      - /var/lib/awx/ee/
+    dest: "{{ backup_dir }}/{{ backup_date }}/aap_custom_content.tar.gz"
+    mode: '0640'
+  register: content_backup
+  ignore_errors: true
+
+- name: Record custom content backup failure
+  ansible.builtin.set_fact:
+    backup_failures: >-
+      {{ backup_failures + ['custom content archive: ' ~ (content_backup.msg | default('failed'))] }}
+  when: content_backup is failed
+
+- name: Export AAP settings
+  ansible.builtin.shell:
+    cmd: set -o pipefail && awx-manage export_settings --indent 2 > {{ backup_dir }}/{{ backup_date }}/aap_settings.json
+    chdir: /var/lib/awx
+    executable: /bin/bash
+  when: ansible_facts['services']['awx.service'] is defined
+  register: settings_export
+  changed_when: settings_export.rc == 0
+  ignore_errors: true
+
+- name: Record settings export failure
+  ansible.builtin.set_fact:
+    backup_failures: >-
+      {{ backup_failures + ['settings export: ' ~ (settings_export.stderr | default('failed'))] }}
+  when: settings_export is failed
+
+- name: Upload backup to Azure Storage (optional)
+  azure.azcollection.azure_rm_storageblob:
+    resource_group: "{{ azure_resource_group | default('rg-ansible-automation-platform') }}"
+    storage_account_name: "{{ azure_storage_account | default('aapbackups') }}"
+    container: "{{ azure_container | default('aap-backups') }}"
+    blob_type: block
+    src: "{{ backup_dir }}/{{ backup_date }}/aap_config_backup.tar.gz"
+    blob: "aap-backup-{{ backup_date }}.tar.gz"
+  when:
+    - azure_backup_enabled | default(false) | bool
+    - config_backup is not failed
+  register: azure_upload
+  ignore_errors: true
+
+- name: Record Azure upload failure
+  ansible.builtin.set_fact:
+    backup_failures: >-
+      {{ backup_failures + ['Azure Storage upload: ' ~ (azure_upload.msg | default('failed'))] }}
+  when: azure_upload is failed
+
+- name: Generate backup manifest
+  ansible.builtin.copy:
+    content: |
+      AAP Backup Manifest
+      ===================
+      Date: {{ backup_date }}
+      Host: {{ ansible_hostname }}
+      AAP Version: {{ ((ansible_facts.packages | default({}))['ansible-automation-platform-installer']
+                       | default([]) | map(attribute='version') | first) | default('unknown', true) }}
+      Status: {{ 'COMPLETE' if backup_failures | length == 0 else 'INCOMPLETE' }}
+      {% if backup_failures | length > 0 %}
+
+      Failed components:
+      {% for failure in backup_failures %}
+      - {{ failure }}
+      {% endfor %}
+      {% endif %}
+
+      Backup Contents:
+      - Database: {{ backup_dir }}/{{ backup_date }}/awx_db_backup.sql
+      - Configuration: {{ backup_dir }}/{{ backup_date }}/aap_config_backup.tar.gz
+      - Custom Content: {{ backup_dir }}/{{ backup_date }}/aap_custom_content.tar.gz
+      - Settings: {{ backup_dir }}/{{ backup_date }}/aap_settings.json
+
+      Restoration Instructions:
+      See restore_aap.yml playbook
+    dest: "{{ backup_dir }}/{{ backup_date }}/MANIFEST.txt"
+    mode: '0640'
+
+- name: Clean up old backups (retention policy)
+  ansible.builtin.find:
+    paths: "{{ backup_dir }}"
+    age: "{{ retention_days }}d"
+    file_type: directory
+  register: old_backups
+  when: backup_failures | length == 0
+
+- name: Remove old backup directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: absent
+  loop: "{{ old_backups.files | default([]) }}"
+
+- name: Fail when the backup is incomplete
+  ansible.builtin.fail:
+    msg: |
+      Backup {{ backup_dir }}/{{ backup_date }} is INCOMPLETE - do not rely on it.
+      {% for failure in backup_failures %}
+      - {{ failure }}
+      {% endfor %}
+  when: backup_failures | length > 0
+
+- name: Display backup completion status
+  ansible.builtin.debug:
+    msg: "Backup completed successfully! Location: {{ backup_dir }}/{{ backup_date }}"

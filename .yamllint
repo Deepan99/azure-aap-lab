@@ -13,29 +13,21 @@ rules:
   comments:
     min-spaces-from-content: 1
 
-  comments-indentation: {}
+  # ansible-lint requires these settings for its own yaml rule to work.
+  comments-indentation: false
+
+  braces:
+    max-spaces-inside: 1
 
   document-start:
-    present: false
+    present: true
 
   empty-lines:
     max: 3
 
   truthy:
     allowed-values: ['true', 'false', 'yes', 'no']
+    check-keys: false
 
   octal-values:
     forbid-implicit-octal: true
-
-  # Disable strict rules for better compatibility
-  MD013: false
-  MD032: false
-  MD022: false
-  MD031: false
-  MD034: false
-  MD042: false
-  MD047: false
-  MD029: false
-  MD024: false
-  MD036: false
-  MD040: false

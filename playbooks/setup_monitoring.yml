@@ -87,7 +87,7 @@
                   systemctl reload awx > /dev/null 2>&1 || true
               endscript
           }
-          
+
           /var/log/awx/*.log {
               daily
               rotate {{ log_retention_days }}
@@ -105,33 +105,48 @@
         content: |
           # AAP Metrics Exporter
           # Exposes AAP and system metrics for Prometheus
-          
+
+          import math
           import psutil
           from prometheus_client import start_http_server, Gauge
+          import sys
           import time
           import subprocess
-          
+
           # System metrics
           cpu_gauge = Gauge('aap_system_cpu_percent', 'CPU usage percentage')
           memory_gauge = Gauge('aap_system_memory_percent', 'Memory usage percentage')
           disk_gauge = Gauge('aap_system_disk_percent', 'Disk usage percentage')
-          
+
           # AAP process metrics
           aap_processes = Gauge('aap_processes_count', 'Number of AAP processes running')
-          
+          collection_errors = Gauge('aap_metrics_collection_errors', 'Metric collections that raised an error')
+
           def get_aap_processes():
-              try:
-                  result = subprocess.run(['pgrep', '-f', 'awx'], capture_output=True, text=True)
-                  return len(result.stdout.splitlines()) if result.returncode == 0 else 0
-              except:
-                  return 0
-          
+              # pgrep exits 1 when nothing matched, which is a real count of 0;
+              # anything else is an error and must not be reported as 0 processes.
+              result = subprocess.run(['pgrep', '-f', 'awx'], capture_output=True, text=True)
+              if result.returncode not in (0, 1):
+                  raise RuntimeError(
+                      'pgrep failed with rc={0}: {1}'.format(result.returncode, result.stderr.strip())
+                  )
+              return len(result.stdout.splitlines())
+
           def collect_metrics():
-              cpu_gauge.set(psutil.cpu_percent(interval=1))
-              memory_gauge.set(psutil.virtual_memory().percent)
-              disk_gauge.set(psutil.disk_usage('/').percent)
-              aap_processes.set(get_aap_processes())
-          
+              # Report NaN rather than a plausible-looking value so a broken
+              # collection shows up as missing data instead of a healthy host.
+              try:
+                  cpu_gauge.set(psutil.cpu_percent(interval=1))
+                  memory_gauge.set(psutil.virtual_memory().percent)
+                  disk_gauge.set(psutil.disk_usage('/').percent)
+                  aap_processes.set(get_aap_processes())
+                  collection_errors.set(0)
+              except Exception as exc:  # noqa: BLE001 - exporter must stay up
+                  print('metric collection failed: {0}'.format(exc), file=sys.stderr, flush=True)
+                  for gauge in (cpu_gauge, memory_gauge, disk_gauge, aap_processes):
+                      gauge.set(math.nan)
+                  collection_errors.set(1)
+
           if __name__ == '__main__':
               start_http_server(9100)
               print("Prometheus exporter started on port 9100")
@@ -147,14 +162,14 @@
           [Unit]
           Description=AAP Metrics Exporter
           After=network.target awx.service
-          
+
           [Service]
           Type=simple
           User=root
           ExecStart=/usr/bin/python3 /usr/local/bin/aap_metrics_exporter.py
           Restart=always
           RestartSec=10
-          
+
           [Install]
           WantedBy=multi-user.target
         dest: /etc/systemd/system/aap-metrics-exporter.service
@@ -168,27 +183,28 @@
       when: monitoring_enabled
 
     - name: Configure Azure Monitor integration (optional)
+      when: install_azure_monitor
       block:
         - name: Install Azure Monitor agent
           dnf:
             name: azure-monitor-agent
             state: present
-          
+
         - name: Configure Azure Monitor
           copy:
             content: |
               # Azure Monitor Configuration
               # Requires Azure Monitor workspace and agent setup
-              
+
               [azure_monitor]
               enabled = true
               workspace_id = {{ azure_workspace_id | default('WORKSPACE_ID') }}
               shared_key = {{ azure_shared_key | default('SHARED_KEY') }}
-              
+
               [log_collection]
               collect_syslog = true
               collect_files = true
-              log_paths = 
+              log_paths =
                   /var/log/tower/
                   /var/log/awx/
                   /var/log/messages
@@ -196,21 +212,20 @@
             mode: '0600'
           notify: Restart Azure Monitor Agent
 
-      when: install_azure_monitor
-
     - name: Install Prometheus (optional)
+      when: install_prometheus
       block:
         - name: Install Prometheus
           dnf:
             name: prometheus
             state: present
-          
+
         - name: Configure Prometheus to scrape AAP metrics
           copy:
             content: |
               global:
                 scrape_interval: 15s
-              
+
               scrape_configs:
                 - job_name: 'aap_metrics'
                   static_configs:
@@ -221,36 +236,35 @@
             mode: '0644'
           notify: Restart Prometheus
 
-      when: install_prometheus
-
     - name: Install Grafana (optional)
+      when: install_grafana
       block:
         - name: Install Grafana
           dnf:
             name: grafana
             state: present
-          
+
         - name: Start Grafana service
           systemd:
             name: grafana-server
             state: started
             enabled: true
-      when: install_grafana
 
     - name: Setup health check monitoring
       copy:
         content: |
           #!/bin/bash
+          set -o pipefail
           # AAP Health Check Script
           # Run this script to monitor AAP health status
-          
+
           # AAP API endpoint
           AAP_API="https://localhost/api/v2/ping/"
-          
+
           # Check AAP API
           check_aap_api() {
-              response=$(curl -k -s -o /dev/null -w "%{http_code}" $AAP_API)
-              if [ $response -eq 200 ]; then
+              response=$(curl -k -s -o /dev/null -w "%{http_code}" "$AAP_API") || response="000"
+              if [ "$response" -eq 200 ]; then
                   echo "✓ AAP API is healthy"
                   return 0
               else
@@ -258,11 +272,10 @@
                   return 1
               fi
           }
-          
+
           # Check PostgreSQL
           check_postgresql() {
-              systemctl is-active --quiet postgresql
-              if [ $? -eq 0 ]; then
+              if systemctl is-active --quiet postgresql; then
                   echo "✓ PostgreSQL is running"
                   return 0
               else
@@ -270,11 +283,10 @@
                   return 1
               fi
           }
-          
+
           # Check AAP service
           check_aap_service() {
-              systemctl is-active --quiet awx
-              if [ $? -eq 0 ]; then
+              if systemctl is-active --quiet awx; then
                   echo "✓ AAP service is running"
                   return 0
               else
@@ -282,11 +294,15 @@
                   return 1
               fi
           }
-          
+
           # Check disk space
           check_disk_space() {
               disk_usage=$(df / | tail -1 | awk '{print $5}' | sed 's/%//')
-              if [ $disk_usage -lt 80 ]; then
+              if [ -z "$disk_usage" ]; then
+                  echo "✗ Could not determine disk usage"
+                  return 1
+              fi
+              if [ "$disk_usage" -lt 80 ]; then
                   echo "✓ Disk space is OK (${disk_usage}% used)"
                   return 0
               else
@@ -294,17 +310,17 @@
                   return 1
               fi
           }
-          
+
           # Main health check
           echo "AAP Health Check - $(date)"
           echo "=========================="
-          
+
           overall_health=0
           check_aap_api || overall_health=1
           check_postgresql || overall_health=1
           check_aap_service || overall_health=1
           check_disk_space || overall_health=1
-          
+
           echo "=========================="
           if [ $overall_health -eq 0 ]; then
               echo "Overall Health: HEALTHY"

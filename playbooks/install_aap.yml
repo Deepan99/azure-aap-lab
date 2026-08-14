@@ -8,12 +8,12 @@
     # Red Hat Portal Registration Credentials
     rh_username: "{{ vault_rh_username | default(lookup('env', 'RH_USERNAME')) }}"
     rh_password: "{{ vault_rh_password | default(lookup('env', 'RH_PASSWORD')) }}"
-    
+
     # AAP Platform Configuration
     aap_version: "2.4"
     aap_admin_password: "{{ vault_aap_admin_password | default(lookup('env', 'AAP_ADMIN_PASSWORD')) }}"
     aap_db_password: "{{ vault_aap_db_password | default(lookup('env', 'AAP_DB_PASSWORD')) }}"
-    
+
     # Paths
     installer_dir: "/opt/ansible-automation-platform/installer"
 
@@ -21,6 +21,9 @@
     # ----------------------------------------------------
     # 1. System Registration & Subscriptions
     # ----------------------------------------------------
+    # subscription-manager exits non-zero when the host is not registered yet,
+    # which is the case this playbook is meant to fix, so the probe itself must
+    # not fail. Its result is acted on by the next task.
     - name: Check system subscription status
       command: subscription-manager status
       register: sub_status
@@ -43,6 +46,9 @@
     # ----------------------------------------------------
     # 2. Package Dependency Installation
     # ----------------------------------------------------
+    # Transient mirror/network errors are retried, but a persistent failure
+    # aborts the play: continuing without the installer package only produces a
+    # more confusing failure later on.
     - name: Install system package dependencies
       dnf:
         name:
@@ -55,35 +61,9 @@
         state: present
         update_cache: true
       register: package_install
-      ignore_errors: true
-
-    - name: Alert on package installation failure
-      debug:
-        msg: "WARNING: Some packages failed to install. This may affect AAP installation."
-      when: package_install is failed
-
-    - name: Retry package installation with error handling
-      dnf:
-        name:
-          - tar
-          - wget
-          - python3
-          - python3-pip
-          - git
-          - ansible-automation-platform-installer
-        state: present
-        update_cache: true
-      register: package_install_retry
-      when: package_install is failed
-      ignore_errors: true
-
-    - name: Fail on persistent package installation failure
-      assert:
-        that:
-          - package_install is succeeded or package_install_retry is succeeded
-        fail_msg: "Failed to install required packages. Please check your network connectivity and repository access."
-        quiet: true
-      when: package_install is failed and package_install_retry is failed
+      until: package_install is succeeded
+      retries: 2
+      delay: 15
 
     # ----------------------------------------------------
     # 3. Create the Installer Inventory File
@@ -130,43 +110,35 @@
     # ----------------------------------------------------
     # 4. Run the AAP Installer Script
     # ----------------------------------------------------
-    - name: Run the Ansible Automation Platform setup script
-      command: "./setup.sh -i {{ installer_dir }}/inventory"
-      args:
-        chdir: "{{ installer_dir }}"
-      register: install_result
-      async: 1800  # Give it up to 30 minutes to install
-      poll: 30     # Check status every 30 seconds
-      ignore_errors: true
+    - name: Install AAP
+      block:
+        - name: Run the Ansible Automation Platform setup script
+          command: "./setup.sh -i {{ installer_dir }}/inventory"
+          args:
+            chdir: "{{ installer_dir }}"
+          register: install_result
+          changed_when: true
+          async: 1800  # Give it up to 30 minutes to install
+          poll: 30     # Check status every 30 seconds
 
-    - name: Alert on installation failure
-      debug:
-        msg: "WARNING: AAP installation failed. Check installer logs for details."
-      when: install_result is failed
+      rescue:
+        - name: Collect installer logs
+          shell: |
+            set -o pipefail
+            tail -n 50 /tmp/ansible-local-*/setup.log 2>/dev/null || echo "Installer logs not found"
+          args:
+            executable: /bin/bash
+          register: installer_logs
+          changed_when: false
+          failed_when: false
 
-    - name: Check installer logs for common errors
-      shell: |
-        if [ -f /tmp/ansible-local-*/setup.log ]; then
-          tail -50 /tmp/ansible-local-*/setup.log
-        else
-          echo "Installer logs not found"
-        fi
-      register: installer_logs
-      when: install_result is failed
-      ignore_errors: true
-
-    - name: Display installer error information
-      debug:
-        msg: "{{ installer_logs.stdout_lines }}"
-      when: install_result is failed and installer_logs.stdout_lines is defined
-
-    - name: Fail on installation failure
-      assert:
-        that:
-          - install_result is succeeded
-        fail_msg: "AAP installation failed. Please review the installer logs and check system requirements."
-        quiet: true
-      when: install_result is failed
+        - name: Fail with the installer error and log tail
+          fail:
+            msg: |
+              AAP installation failed: {{ ansible_failed_result.msg | default(ansible_failed_result) }}
+              Installer stderr: {{ ansible_failed_result.stderr | default('n/a') }}
+              Last 50 log lines:
+              {{ installer_logs.stdout | default('unavailable') }}
 
     - name: Wait for AAP services to be ready
       uri:

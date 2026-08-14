@@ -78,4 +78,8 @@
 
     - name: Output VM IP Address
       debug:
-        msg: "VM created! Public IP is: {{ vm_result.ansible_facts.azure_vm.properties.networkProfile.networkInterfaces[0].properties.ipConfigurations[0].properties.publicIPAddress.properties.ipAddress | default('Not found') }}"
+        msg: >-
+          VM created! Public IP is:
+          {{ vm_result.ansible_facts.azure_vm.properties.networkProfile.networkInterfaces[0]
+             .properties.ipConfigurations[0].properties.publicIPAddress.properties.ipAddress
+             | default('Not found') }}

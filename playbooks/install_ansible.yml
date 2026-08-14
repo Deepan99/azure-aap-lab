@@ -9,6 +9,7 @@
     # Ubuntu/Debian Installation
     # ----------------------------------------------------
     - name: Install Ansible on Debian/Ubuntu systems
+      when: ansible_os_family == 'Debian'
       block:
         - name: Ensure gpg and dirmngr are installed
           apt:
@@ -30,12 +31,12 @@
             name: ansible
             state: present
             update_cache: true
-      when: ansible_os_family == 'Debian'
 
     # ----------------------------------------------------
     # RHEL/CentOS/Rocky Linux Installation
     # ----------------------------------------------------
     - name: Install Ansible on Red Hat systems
+      when: ansible_os_family == 'RedHat'
       block:
         - name: Enable EPEL repository (CentOS/Rocky/RHEL)
           dnf:
@@ -43,11 +44,16 @@
             state: present
           when: ansible_distribution != 'RedHat'
 
+        # The repository may already be enabled or be unavailable on a host with
+        # a limited subscription; the package install below is what decides
+        # whether that actually matters, so only the rc is tolerated here.
         - name: Enable Ansible subscription repository (RHEL only)
           command: subscription-manager repos --enable=ansible-2.9-for-rhel-8-x86_64-rpms
           when:
             - ansible_distribution == 'RedHat'
             - ansible_distribution_major_version == '8'
+          register: rhel8_repo
+          changed_when: rhel8_repo.rc == 0
           failed_when: false
 
         - name: Enable Ansible Automation Platform repository (RHEL 9 only)
@@ -55,6 +61,8 @@
           when:
             - ansible_distribution == 'RedHat'
             - ansible_distribution_major_version == '9'
+          register: rhel9_repo
+          changed_when: rhel9_repo.rc == 0
           failed_when: false
 
         - name: Install Ansible package
@@ -64,15 +72,24 @@
               - ansible
             state: present
             enablerepo: epel
-          failed_when: false
+          register: dnf_ansible
+          ignore_errors: true
 
-        # Fallback to pip if packages not found in standard RHEL repos
+        - name: Report the dnf failure before falling back to pip
+          debug:
+            msg: >-
+              Installing Ansible from RPM repositories failed
+              ({{ dnf_ansible.msg | default('unknown error') }}); falling back to pip.
+          when: dnf_ansible is failed
+
+        # Fallback to pip only when the RPM install actually failed, and let a
+        # pip failure abort the play so the host is never left without Ansible.
         - name: Install Ansible via pip if package install failed
           pip:
             name: ansible
             state: present
             executable: pip3
-      when: ansible_os_family == 'RedHat'
+          when: dnf_ansible is failed
 
     # ----------------------------------------------------
     # Verification Task
@@ -81,6 +98,7 @@
       command: ansible --version
       register: ansible_version_output
       changed_when: false
+      failed_when: ansible_version_output.rc != 0 or 'ansible' not in ansible_version_output.stdout
 
     - name: Display Installed Ansible Version
       debug:

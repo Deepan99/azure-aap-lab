@@ -1,0 +1,157 @@
+---
+# Restore task list, shared by restore_aap.yml and the rollback path of
+# upgrade_aap.yml.
+#
+# Restore steps are never allowed to fail silently: any failure aborts the
+# remaining steps, services are brought back up and the task list fails with
+# the underlying error, so callers (and the rollback path) can react.
+#
+# Expected variables: backup_dir, backup_date, restore_method
+# Optional: restore_require_confirmation (default true)
+
+- name: Validate restore request
+  ansible.builtin.assert:
+    that:
+      - backup_date | default('') | length > 0
+      - restore_method in ['database', 'config', 'full']
+    fail_msg: >-
+      backup_date must be set (e.g. -e backup_date=20260814T120000) and
+      restore_method must be one of database, config or full
+      (got '{{ restore_method | default('') }}').
+
+- name: Validate backup directory exists
+  ansible.builtin.stat:
+    path: "{{ backup_dir }}/{{ backup_date }}"
+  register: backup_check
+  failed_when: not backup_check.stat.isdir | default(false)
+
+- name: Check backup artefacts required by the restore method
+  ansible.builtin.stat:
+    path: "{{ backup_dir }}/{{ backup_date }}/{{ item }}"
+  register: artefact_check
+  loop: "{{ (['awx_db_backup.sql'] if restore_method in ['database', 'full'] else []) + (['aap_config_backup.tar.gz', 'aap_custom_content.tar.gz'] if restore_method in ['config', 'full'] else []) }}"
+
+- name: Fail when required backup artefacts are missing
+  ansible.builtin.fail:
+    msg: >-
+      Backup {{ backup_dir }}/{{ backup_date }} is missing artefacts required for a
+      '{{ restore_method }}' restore:
+      {{ artefact_check.results | rejectattr('stat.exists') | map(attribute='item') | join(', ') }}
+  when: artefact_check.results | rejectattr('stat.exists') | list | length > 0
+
+- name: Display backup manifest
+  ansible.builtin.slurp:
+    src: "{{ backup_dir }}/{{ backup_date }}/MANIFEST.txt"
+  register: manifest
+  ignore_errors: true
+
+- name: Show backup information
+  ansible.builtin.debug:
+    msg: "{{ manifest.content | b64decode }}"
+  when: manifest is not failed
+
+- name: Warn when the backup manifest is unreadable
+  ansible.builtin.debug:
+    msg: "WARNING: no readable MANIFEST.txt in {{ backup_dir }}/{{ backup_date }}; the backup may be incomplete."
+  when: manifest is failed
+
+- name: Confirm restore operation
+  ansible.builtin.pause:
+    prompt: "Are you sure you want to restore from {{ backup_date }}? This will overwrite current data. (yes/no)"
+  register: confirm_restore
+  when: restore_require_confirmation | default(true) | bool
+
+- name: Determine whether the restore is confirmed
+  ansible.builtin.set_fact:
+    restore_confirmed: >-
+      {{ (confirm_restore.user_input | default('') | trim | lower) in ['yes', 'y']
+         if restore_require_confirmation | default(true) | bool else true }}
+
+- name: Display cancellation message
+  ansible.builtin.debug:
+    msg: "Restore operation cancelled by user."
+  when: not restore_confirmed | bool
+
+- name: Restore AAP
+  when: restore_confirmed | bool
+  block:
+    - name: Stop AAP services before restore
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        state: stopped
+      loop:
+        - awx
+        - postgresql
+
+    - name: Restore PostgreSQL database
+      community.postgresql.postgresql_db:
+        name: awx
+        state: restore
+        target: "{{ backup_dir }}/{{ backup_date }}/awx_db_backup.sql"
+      become: true
+      become_user: awx
+      when: restore_method in ['database', 'full']
+
+    - name: Restore AAP configuration files
+      ansible.builtin.unarchive:
+        src: "{{ backup_dir }}/{{ backup_date }}/aap_config_backup.tar.gz"
+        dest: /
+        remote_src: true
+      when: restore_method in ['config', 'full']
+
+    - name: Restore custom EE images and projects
+      ansible.builtin.unarchive:
+        src: "{{ backup_dir }}/{{ backup_date }}/aap_custom_content.tar.gz"
+        dest: /
+        remote_src: true
+      when: restore_method in ['config', 'full']
+
+    - name: Restore AAP settings
+      ansible.builtin.command:
+        cmd: awx-manage import_settings {{ backup_dir }}/{{ backup_date }}/aap_settings.json
+        chdir: /var/lib/awx
+      register: settings_import
+      changed_when: settings_import.rc == 0
+      when: restore_method in ['config', 'full']
+
+    - name: Restart AAP services
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        state: started
+        enabled: true
+      loop:
+        - postgresql
+        - awx
+
+    - name: Wait for AAP services to be ready
+      ansible.builtin.uri:
+        url: "https://{{ ansible_default_ipv4.address | default(ansible_all_ipv4_addresses[0]) }}/api/v2/ping/"
+        method: GET
+        validate_certs: false
+        return_content: true
+      register: aap_ping
+      until: aap_ping.status == 200
+      retries: 30
+      delay: 10
+
+    - name: Display restore completion status
+      ansible.builtin.debug:
+        msg: "Restore completed successfully from {{ backup_date }}! Please verify AAP functionality."
+
+  rescue:
+    - name: Attempt to bring AAP services back up after a failed restore
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        state: started
+      loop:
+        - postgresql
+        - awx
+      register: recovery_start
+      failed_when: false
+
+    - name: Report the restore failure
+      ansible.builtin.fail:
+        msg: |
+          Restore from {{ backup_date }} FAILED at task '{{ ansible_failed_task.name }}'.
+          AAP may be in an inconsistent state - inspect the host before retrying.
+          Error: {{ ansible_failed_result.msg | default(ansible_failed_result) }}

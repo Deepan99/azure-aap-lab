@@ -181,7 +181,7 @@ find /opt/aap-backups/ -type d -mtime +7 -exec rm -rf {} \;
 ### Backup Fails
 
 **Issue**: Backup playbook fails during database dump
-**Solution**: 
+**Solution**:
 - Check PostgreSQL service status
 - Verify sufficient disk space
 - Check database connectivity
