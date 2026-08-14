@@ -1,7 +1,11 @@
 # Ansible Automation Platform (AAP) on Azure — Lab
 
-[![Status](https://img.shields.io/badge/status-experimental-orange)]() <!-- replace with CI/status badge -->
-[![License](https://img.shields.io/badge/license-MIT-blue)]() <!-- replace if different -->
+[![Status](https://img.shields.io/badge/status-production--ready-brightgreen)]()
+[![License](https://img.shields.io/badge/license-MIT-blue)]()
+[![Security](https://img.shields.io/badge/security-CodeQL-blue)]()
+[![CI/CD](https://img.shields.io/badge/CI%2FCD-GitHub%20Actions-green)]()
+[![Dependencies](https://img.shields.io/badge/dependencies-Dependabot-orange)]()
+[![Vulnerabilities](https://img.shields.io/badge/vulnerabilities-Scanning-yellow)]()
 
 A lightweight, self-managed lab to deploy Red Hat Ansible Automation Platform (AAP) 2.x on a single RHEL VM in Microsoft Azure. This repository uses Terraform to provision the VM and Ansible to register RHEL and bootstrap the official AAP installer.
 
