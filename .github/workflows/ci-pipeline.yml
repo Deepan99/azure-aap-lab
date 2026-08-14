@@ -269,4 +269,3 @@ jobs:
           status: ${{ job.status }}
           text: 'Deployment status: ${{ job.status }}'
           webhook_url: ${{ secrets.SLACK_WEBHOOK }}
-        if: always()
