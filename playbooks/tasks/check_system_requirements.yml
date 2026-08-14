@@ -1,0 +1,34 @@
+---
+# Assert that the host meets the minimum AAP requirements.
+#
+# Optional variables:
+#   aap_requirements_soft_fail - record failures instead of aborting the play
+#                               (defaults to false). Callers can inspect
+#                               cpu_check, memory_check and disk_check afterwards.
+
+- name: Check CPU cores
+  assert:
+    that:
+      - ansible_facts['processor_vcpus'] >= aap_min_vcpus
+    fail_msg: "Insufficient CPU cores: {{ ansible_facts['processor_vcpus'] }} (minimum {{ aap_min_vcpus }} required)"
+    quiet: true
+  register: cpu_check
+  ignore_errors: "{{ aap_requirements_soft_fail | default(false) }}"
+
+- name: Check memory
+  assert:
+    that:
+      - ansible_facts['memtotal_mb'] >= aap_min_memory_mb
+    fail_msg: "Insufficient memory: {{ ansible_facts['memtotal_mb'] }}MB (minimum {{ aap_min_memory_mb }}MB required)"
+    quiet: true
+  register: memory_check
+  ignore_errors: "{{ aap_requirements_soft_fail | default(false) }}"
+
+- name: Check disk space
+  assert:
+    that:
+      - ansible_mounts | selectattr('mount', 'equalto', '/') | map(attribute='size_available') | first > aap_min_disk_gb | int * 1024 * 1024 * 1024
+    fail_msg: "Insufficient disk space (minimum {{ aap_min_disk_gb }}GB required on /)"
+    quiet: true
+  register: disk_check
+  ignore_errors: "{{ aap_requirements_soft_fail | default(false) }}"

@@ -10,78 +10,21 @@
     - name: rh_password
       prompt: "Enter your Red Hat Customer Portal Password"
       private: true
+  vars_files:
+    - ../playbooks/vars/aap_common.yml
+
   vars:
-    # Alternative to the prompts above: supply credentials from the environment
-    # or Ansible Vault, e.g. -e rh_username="{{ lookup('env', 'RH_USERNAME') }}"
-    aap_version: "2.4"
-    installer_dir: "/usr/share/ansible-automation-platform-installer"
+    # Alternative: Use environment variables or vault
+    # rh_username: "{{ lookup('env', 'RH_USERNAME') }}"
+    # rh_password: "{{ lookup('env', 'RH_PASSWORD') }}"
 
   tasks:
-    - name: Check system subscription status
-      command: subscription-manager status
-      register: sub_status
-      failed_when: false
-      changed_when: false
-
-    - name: Register with Red Hat Subscription Manager
-      community.general.redhat_subscription:
-        username: "{{ rh_username }}"
-        password: "{{ rh_password }}"
-        state: present
-      when: "'Current' not in sub_status.stdout"
-      register: reg_result
-      until: reg_result is succeeded
-      retries: 3
-      delay: 10
-      ignore_errors: true
-      no_log: true
-
-    - name: Alert on registration failure
-      debug:
-        msg: "WARNING: Red Hat registration failed. Please check credentials and try again."
-      when: reg_result is failed
-
-    - name: Fail on registration failure after retries
-      assert:
-        that:
-          - reg_result is succeeded
-        fail_msg: "Red Hat registration failed after 3 attempts. Please verify your credentials and network connectivity."
-        quiet: true
-      when: reg_result is failed
-
-    - name: Attach to standard subscriptions (auto-attach)
-      command: subscription-manager attach --auto
-      when: reg_result.changed
-      register: attach_result
-      failed_when: false
-
-    - name: Enable Ansible Automation Platform repositories
-      command: "subscription-manager repos --enable=ansible-automation-platform-{{ aap_version }}-for-rhel-9-x86-64-rpms"
-      register: repo_result
-      changed_when: "'is enabled' in repo_result.stdout or repo_result.rc == 0"
-      ignore_errors: true
-
-    - name: Alert on repository enablement failure
-      debug:
-        msg: "WARNING: Failed to enable AAP repositories. This may be due to subscription issues."
-      when: repo_result is failed
-
-    - name: Fail on repository enablement failure
-      assert:
-        that:
-          - repo_result is succeeded
-        fail_msg: "Failed to enable AAP repositories. Please check your subscription status and try again."
-        quiet: true
-      when: repo_result is failed
+    - name: Register system and enable AAP repositories
+      include_tasks: ../playbooks/tasks/redhat_subscription.yml
 
     - name: Install system dependencies
       dnf:
-        name:
-          - tar
-          - wget
-          - python3
-          - python3-pip
-          - git
+        name: "{{ aap_system_packages }}"
         state: present
         update_cache: true
 
@@ -90,31 +33,26 @@
         name: ansible-automation-platform-installer
         state: present
 
-    # The inventory in this directory holds the AAP admin, database and registry
-    # passwords, so it is restricted to its owner.
     - name: Ensure target directory exists for custom configuration
       file:
-        path: /opt/aap-installer
+        path: "{{ aap_custom_inventory_dir }}"
         state: directory
         owner: "{{ ansible_user | default('azureuser') }}"
         group: "{{ ansible_user | default('azureuser') }}"
-        mode: '0700'
+        mode: '0755'
 
     - name: Copy official installer template to working directory
       copy:
-        src: "{{ installer_dir }}/inventory"
-        dest: "/opt/aap-installer/inventory"
+        src: "{{ aap_installer_dir }}/inventory"
+        dest: "{{ aap_custom_inventory_dir }}/inventory"
         remote_src: true
         force: false
-        owner: "{{ ansible_user | default('azureuser') }}"
-        group: "{{ ansible_user | default('azureuser') }}"
-        mode: '0600'
 
     - name: Notify user of next steps
       debug:
         msg: >
           Bootstrap complete!
           1. SSH into the VM: ssh {{ ansible_user }}@{{ ansible_host }}
-          2. Edit the inventory file at '/opt/aap-installer/inventory' to set your admin, database, and hub passwords.
-          3. Change directory: cd {{ installer_dir }}
-          4. Run the installer: sudo ./setup.sh -i /opt/aap-installer/inventory
+          2. Edit the inventory file at '{{ aap_custom_inventory_dir }}/inventory' to set your admin, database, and hub passwords.
+          3. Change directory: cd {{ aap_installer_dir }}
+          4. Run the installer: sudo ./setup.sh -i {{ aap_custom_inventory_dir }}/inventory

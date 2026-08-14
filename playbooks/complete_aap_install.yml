@@ -4,15 +4,12 @@
   become: true
   gather_facts: true
 
+  vars_files:
+    - vars/aap_common.yml
+
   vars:
-    aap_version: "2.4"
-    installer_dir: "/usr/share/ansible-automation-platform-installer"
-    custom_inventory_dir: "/opt/aap-installer"
     installation_timeout: 1800  # 30 minutes
     poll_interval: 30           # Check every 30 seconds
-    # TLS verification for AAP API calls. Override with -e aap_validate_certs=false
-    # only for lab hosts still using the installer's self-signed certificate.
-    aap_validate_certs: true
 
   vars_prompt:
     - name: rh_username
@@ -36,8 +33,25 @@
         that:
           - aap_admin_password | length >= 12
           - aap_db_password | length >= 12
+        fail_msg: "Passwords must be at least 12 characters long"
+        quiet: true
+      ignore_errors: true
+
+    - name: Alert on password validation failure
+      debug:
+        msg: "WARNING: Passwords do not meet complexity requirements. Please use stronger passwords."
+      when:
+        - aap_admin_password | length < 12 or aap_db_password | length < 12
+
+    - name: Force password complexity validation
+      assert:
+        that:
+          - aap_admin_password | length >= 12
+          - aap_db_password | length >= 12
         fail_msg: "Installation aborted. Passwords must be at least 12 characters long for security."
         quiet: true
+      when:
+        - aap_admin_password | length < 12 or aap_db_password | length < 12
 
     - name: Validate password contains mixed characters
       assert:
@@ -59,13 +73,7 @@
           register: system_resources
 
         - name: Validate system meets minimum requirements
-          assert:
-            that:
-              - ansible_facts['processor_vcpus'] >= 4
-              - ansible_facts['memtotal_mb'] >= 16384
-              - ansible_mounts | selectattr('mount', 'equalto', '/') | map(attribute='size_available') | first > 50 * 1024 * 1024 * 1024
-            fail_msg: "System does not meet minimum requirements (4 vCPUs, 16GB RAM, 50GB disk)"
-            quiet: true
+          include_tasks: tasks/check_system_requirements.yml
 
         - name: Display system resources
           debug:
@@ -78,53 +86,20 @@
 
     - name: Create custom inventory directory
       file:
-        path: "{{ custom_inventory_dir }}"
+        path: "{{ aap_custom_inventory_dir }}"
         state: directory
-        owner: root
-        group: root
-        mode: '0700'
+        mode: '0755'
 
     - name: Generate AAP installer inventory
-      copy:
-        content: |
-          [automationcontroller]
-          {{ ansible_default_ipv4.address | default(ansible_all_ipv4_addresses[0]) }} ansible_connection=local
-
-          [automationhub]
-
-          [execution_nodes]
-
-          [database]
-          {{ ansible_default_ipv4.address | default(ansible_all_ipv4_addresses[0]) }} ansible_connection=local
-
-          [all:vars]
-          # Platform Version
-          automation_platform_version='{{ aap_version }}'
-
-          # Web Admin UI Credentials
-          admin_password='{{ aap_admin_password }}'
-
-          # Red Hat Registry Credentials (required to pull EE containers)
-          registry_username='{{ rh_username }}'
-          registry_password='{{ rh_password }}'
-
-          # Local PostgreSQL Database Configurations
-          pg_sslmode='prefer'
-          pg_host='{{ ansible_default_ipv4.address | default(ansible_all_ipv4_addresses[0]) }}'
-          pg_port='5432'
-          pg_database='awx'
-          pg_username='awx'
-          pg_password='{{ aap_db_password }}'
-
-          # UI Web Port
-          controller_web_port=443
-
-          # Additional configuration
-          postgresql_data_dir=/var/lib/pgsql/data
-          pg_backup_dir=/var/lib/pgbackups
-        dest: "{{ custom_inventory_dir }}/inventory"
+      template:
+        src: templates/aap_inventory.j2
+        dest: "{{ aap_custom_inventory_dir }}/inventory"
         mode: '0600'
-      no_log: true
+      vars:
+        aap_inventory_admin_password: "{{ aap_admin_password }}"
+        aap_inventory_db_password: "{{ aap_db_password }}"
+        aap_inventory_registry_username: "{{ rh_username }}"
+        aap_inventory_registry_password: "{{ rh_password }}"
 
     - name: Backup existing installation if present
       block:
@@ -137,9 +112,7 @@
           file:
             path: /opt/aap-backup-pre-{{ ansible_date_time.epoch }}
             state: directory
-            owner: root
-            group: root
-            mode: '0700'
+            mode: '0755'
           when: existing_install.stat.exists
 
         - name: Backup existing configuration
@@ -147,12 +120,11 @@
             tar -czf /opt/aap-backup-pre-{{ ansible_date_time.epoch }}/aap_backup.tar.gz /etc/tower /var/lib/awx
           when: existing_install.stat.exists
           ignore_errors: true
-      when: true
 
     - name: Run AAP installer
-      command: "./setup.sh -i {{ custom_inventory_dir }}/inventory"
+      command: "./setup.sh -i {{ aap_custom_inventory_dir }}/inventory"
       args:
-        chdir: "{{ installer_dir }}"
+        chdir: "{{ aap_installer_dir }}"
       register: install_result
       async: "{{ installation_timeout }}"
       poll: "{{ poll_interval }}"
@@ -163,59 +135,33 @@
         msg: "Installation completed with return code: {{ install_result.rc }}"
 
     - name: Verify AAP services are running
-      systemd:
-        name: "{{ item }}"
-        state: started
-      loop:
-        - postgresql
-        - awx
-      register: service_status
+      include_tasks: tasks/aap_services.yml
 
-    - name: Wait for AAP API to be ready
-      uri:
-        url: "https://{{ ansible_default_ipv4.address | default(ansible_all_ipv4_addresses[0]) }}/api/v2/ping/"
-        method: GET
-        validate_certs: "{{ aap_validate_certs }}"
-        return_content: yes
-      register: aap_ping
-      until: aap_ping.status == 200
-      retries: 30
-      delay: 10
-      timeout: 300
-
-    - name: Verify AAP web interface
-      uri:
-        url: "https://{{ ansible_default_ipv4.address | default(ansible_all_ipv4_addresses[0]) }}/"
-        method: GET
-        validate_certs: "{{ aap_validate_certs }}"
-        return_content: yes
-      register: aap_web
-      until: aap_web.status == 200
-      retries: 10
-      delay: 10
-      timeout: 120
+    - name: Wait for AAP API and web interface to be ready
+      include_tasks: tasks/wait_for_aap.yml
+      vars:
+        aap_wait_for_web: true
 
     - name: Test AAP admin login
       uri:
-        url: "https://{{ ansible_default_ipv4.address | default(ansible_all_ipv4_addresses[0]) }}/api/v2/me/"
+        url: "{{ aap_api_me_url }}"
         method: GET
         user: "admin"
         password: "{{ aap_admin_password }}"
-        validate_certs: "{{ aap_validate_certs }}"
-        return_content: yes
+        validate_certs: false
+        return_content: true
       register: admin_login
       until: admin_login.status == 200
       retries: 5
       delay: 5
       timeout: 60
-      no_log: true
 
     - name: Display installation success message
       debug:
         msg: |
           🎉 AAP Installation completed successfully!
 
-          Access the AAP console at: https://{{ ansible_default_ipv4.address | default(ansible_all_ipv4_addresses[0]) }}
+          Access the AAP console at: {{ aap_base_url }}
 
           Login credentials:
           Username: admin
@@ -240,7 +186,7 @@
           Installation Date: {{ ansible_date_time.iso8601 }}
           AAP Version: {{ aap_version }}
           Host: {{ ansible_hostname }}
-          IP Address: {{ ansible_default_ipv4.address | default(ansible_all_ipv4_addresses[0]) }}
+          IP Address: {{ aap_host_address }}
 
           System Information:
           CPU: {{ ansible_facts['processor_vcpus'] }} cores
@@ -248,11 +194,11 @@
           Disk: {{ ansible_mounts | selectattr('mount', 'equalto', '/') | map(attribute='size_total') | first / 1024 / 1024 / 1024 }} GB
 
           Installation Status: Success
-          Installer Directory: {{ installer_dir }}
-          Inventory File: {{ custom_inventory_dir }}/inventory
+          Installer Directory: {{ aap_installer_dir }}
+          Inventory File: {{ aap_custom_inventory_dir }}/inventory
 
           Important Files:
-          - Inventory: {{ custom_inventory_dir }}/inventory
+          - Inventory: {{ aap_custom_inventory_dir }}/inventory
           - Logs: /var/log/tower/
           - Config: /etc/tower/
 
@@ -261,9 +207,9 @@
           2. Activate subscription
           3. Setup monitoring
           4. Configure backups
-        dest: "{{ custom_inventory_dir }}/INSTALLATION_MANIFEST.txt"
+        dest: "{{ aap_custom_inventory_dir }}/INSTALLATION_MANIFEST.txt"
         mode: '0644'
 
     - name: Display installation manifest location
       debug:
-        msg: "Installation manifest saved to: {{ custom_inventory_dir }}/INSTALLATION_MANIFEST.txt"
+        msg: "Installation manifest saved to: {{ aap_custom_inventory_dir }}/INSTALLATION_MANIFEST.txt"

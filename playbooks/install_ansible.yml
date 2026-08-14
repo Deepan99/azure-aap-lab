@@ -4,6 +4,9 @@
   become: true
   gather_facts: true
 
+  vars_files:
+    - vars/aap_common.yml
+
   tasks:
     # ----------------------------------------------------
     # Ubuntu/Debian Installation
@@ -51,7 +54,7 @@
           failed_when: false
 
         - name: Enable Ansible Automation Platform repository (RHEL 9 only)
-          command: subscription-manager repos --enable=ansible-automation-platform-2.4-for-rhel-9-x86_64-rpms
+          command: "subscription-manager repos --enable={{ aap_repo_name }}"
           when:
             - ansible_distribution == 'RedHat'
             - ansible_distribution_major_version == '9'

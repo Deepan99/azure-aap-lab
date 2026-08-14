@@ -1,0 +1,17 @@
+---
+# Bring a set of AAP related services into the requested state.
+#
+# Optional variables:
+#   aap_services         - list of services (defaults to aap_core_services)
+#   aap_service_state    - started | stopped | restarted (defaults to started)
+#   aap_service_enabled  - whether to enable the units at boot (omitted by default)
+#   aap_service_ignore_errors - keep going when a unit cannot be managed (defaults to false)
+
+- name: "Ensure AAP services are {{ aap_service_state | default('started') }}"
+  systemd:
+    name: "{{ item }}"
+    state: "{{ aap_service_state | default('started') }}"
+    enabled: "{{ aap_service_enabled | default(omit) }}"
+  loop: "{{ aap_services | default(aap_core_services) }}"
+  register: aap_service_status
+  ignore_errors: "{{ aap_service_ignore_errors | default(false) }}"

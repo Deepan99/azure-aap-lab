@@ -4,73 +4,34 @@
   become: true
   gather_facts: true
 
+  vars_files:
+    - vars/aap_common.yml
+
   vars:
     # Red Hat Portal Registration Credentials
     rh_username: "{{ vault_rh_username | default(lookup('env', 'RH_USERNAME')) }}"
     rh_password: "{{ vault_rh_password | default(lookup('env', 'RH_PASSWORD')) }}"
 
     # AAP Platform Configuration
-    aap_version: "2.4"
     aap_admin_password: "{{ vault_aap_admin_password | default(lookup('env', 'AAP_ADMIN_PASSWORD')) }}"
     aap_db_password: "{{ vault_aap_db_password | default(lookup('env', 'AAP_DB_PASSWORD')) }}"
 
     # Paths
     installer_dir: "/opt/ansible-automation-platform/installer"
 
-    # TLS verification for AAP API calls. Override with -e aap_validate_certs=false
-    # only for lab hosts still using the installer's self-signed certificate.
-    aap_validate_certs: true
-
   tasks:
-    - name: Assert that required credentials are provided
-      assert:
-        that:
-          - rh_username | default('', true) | length > 0
-          - rh_password | default('', true) | length > 0
-          - aap_admin_password | default('', true) | length >= 12
-          - aap_db_password | default('', true) | length >= 12
-        fail_msg: >-
-          Missing credentials. Provide vault_rh_username/vault_rh_password/
-          vault_aap_admin_password/vault_aap_db_password via Ansible Vault, or the
-          RH_USERNAME/RH_PASSWORD/AAP_ADMIN_PASSWORD/AAP_DB_PASSWORD environment
-          variables. Passwords must be at least 12 characters.
-        quiet: true
-
     # ----------------------------------------------------
     # 1. System Registration & Subscriptions
     # ----------------------------------------------------
-    - name: Check system subscription status
-      command: subscription-manager status
-      register: sub_status
-      failed_when: false
-      changed_when: false
-
-    - name: Register with Red Hat Subscription Manager
-      community.general.redhat_subscription:
-        username: "{{ rh_username }}"
-        password: "{{ rh_password }}"
-        state: present
-      when: "'Current' not in sub_status.stdout"
-      register: reg_result
-      no_log: true
-
-    - name: Enable Ansible Automation Platform repository
-      command: "subscription-manager repos --enable=ansible-automation-platform-{{ aap_version }}-for-rhel-9-x86-64-rpms"
-      register: repo_result
-      changed_when: "'is enabled' in repo_result.stdout or repo_result.rc == 0"
+    - name: Register system and enable AAP repositories
+      include_tasks: tasks/redhat_subscription.yml
 
     # ----------------------------------------------------
     # 2. Package Dependency Installation
     # ----------------------------------------------------
     - name: Install system package dependencies
       dnf:
-        name:
-          - tar
-          - wget
-          - python3
-          - python3-pip
-          - git
-          - ansible-automation-platform-installer
+        name: "{{ aap_system_packages + ['ansible-automation-platform-installer'] }}"
         state: present
         update_cache: true
       register: package_install
@@ -83,13 +44,7 @@
 
     - name: Retry package installation with error handling
       dnf:
-        name:
-          - tar
-          - wget
-          - python3
-          - python3-pip
-          - git
-          - ansible-automation-platform-installer
+        name: "{{ aap_system_packages + ['ansible-automation-platform-installer'] }}"
         state: present
         update_cache: true
       register: package_install_retry
@@ -108,44 +63,17 @@
     # 3. Create the Installer Inventory File
     # ----------------------------------------------------
     - name: Generate the AAP installation inventory configuration
-      copy:
-        content: |
-          [automationcontroller]
-          {{ ansible_default_ipv4.address | default(ansible_all_ipv4_addresses[0]) }} ansible_connection=local
-
-          [automationhub]
-
-          [execution_nodes]
-
-          [database]
-          {{ ansible_default_ipv4.address | default(ansible_all_ipv4_addresses[0]) }} ansible_connection=local
-
-          [all:vars]
-          # Platform Version
-          automation_platform_version='{{ aap_version }}'
-
-          # Web Admin UI Credentials
-          admin_password='{{ aap_admin_password }}'
-
-          # Red Hat Registry Credentials (required to pull EE containers)
-          registry_username='{{ rh_username }}'
-          registry_password='{{ rh_password }}'
-
-          # Local PostgreSQL Database Configurations
-          pg_sslmode='prefer'
-          pg_host='{{ ansible_default_ipv4.address | default(ansible_all_ipv4_addresses[0]) }}'
-          pg_port='5432'
-          pg_database='awx'
-          pg_username='awx'
-          pg_password='{{ aap_db_password }}'
-
-          # UI Web Port
-          controller_web_port=443
+      template:
+        src: templates/aap_inventory.j2
         dest: "{{ installer_dir }}/inventory"
         owner: root
         group: root
         mode: '0600'
-      no_log: true
+      vars:
+        aap_inventory_admin_password: "{{ aap_admin_password }}"
+        aap_inventory_db_password: "{{ aap_db_password }}"
+        aap_inventory_registry_username: "{{ rh_username }}"
+        aap_inventory_registry_password: "{{ rh_password }}"
 
     # ----------------------------------------------------
     # 4. Run the AAP Installer Script
@@ -188,38 +116,13 @@
         quiet: true
       when: install_result is failed
 
-    - name: Wait for AAP services to be ready
-      uri:
-        url: "https://{{ ansible_default_ipv4.address | default(ansible_all_ipv4_addresses[0]) }}/api/v2/ping/"
-        method: GET
-        validate_certs: "{{ aap_validate_certs }}"
-        return_content: yes
-      register: aap_ping
-      until: aap_ping.status == 200
-      retries: 30
-      delay: 10
-      timeout: 300
-
-    - name: Check AAP web interface accessibility
-      uri:
-        url: "https://{{ ansible_default_ipv4.address | default(ansible_all_ipv4_addresses[0]) }}/"
-        method: GET
-        validate_certs: "{{ aap_validate_certs }}"
-        return_content: yes
-      register: aap_web
-      until: aap_web.status == 200
-      retries: 10
-      delay: 10
-      timeout: 120
+    - name: Wait for AAP API and web interface to be ready
+      include_tasks: tasks/wait_for_aap.yml
+      vars:
+        aap_wait_for_web: true
 
     - name: Check critical AAP services status
-      systemd:
-        name: "{{ item }}"
-        state: started
-      loop:
-        - awx
-        - postgresql
-      register: service_status
+      include_tasks: tasks/aap_services.yml
 
     - name: Output installation result
       debug:
