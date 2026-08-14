@@ -46,10 +46,15 @@ jobs:
           cd terraform
           terraform validate
 
+      # tfsec is deprecated and folded into Trivy; aquasecurity/tfsec-action has no
+      # v1.28.1 tag, so this step could never resolve.
       - name: Terraform Security Scan
-        uses: aquasecurity/tfsec-action@v1.28.1
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
-          working_directory: terraform/
+          scan-type: 'config'
+          scan-ref: 'terraform/'
+          exit-code: '1'
+          severity: 'HIGH,CRITICAL'
 
   validate-ansible:
     name: Validate Ansible Playbooks
@@ -123,7 +128,7 @@ jobs:
 
       - name: Run Trivy vulnerability scanner
         # Pinned: '@master' runs unreviewed third-party code on every build.
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: 'fs'
           scan-ref: '.'
