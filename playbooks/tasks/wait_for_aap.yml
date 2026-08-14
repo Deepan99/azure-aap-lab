@@ -1,0 +1,28 @@
+---
+# Wait until the AAP API (and optionally the web interface) answers with HTTP 200.
+#
+# Optional variables:
+#   aap_wait_for_web - also poll the web interface (defaults to false)
+
+- name: Wait for the AAP API to be ready
+  uri:
+    url: "{{ aap_api_ping_url }}"
+    method: GET
+    validate_certs: false
+    return_content: true
+  register: aap_ping
+  until: aap_ping.status == 200
+  retries: "{{ aap_api_ready_retries }}"
+  delay: "{{ aap_api_ready_delay }}"
+
+- name: Wait for the AAP web interface to be ready
+  uri:
+    url: "{{ aap_base_url }}/"
+    method: GET
+    validate_certs: false
+    return_content: true
+  register: aap_web
+  until: aap_web.status == 200
+  retries: "{{ aap_web_ready_retries }}"
+  delay: "{{ aap_web_ready_delay }}"
+  when: aap_wait_for_web | default(false) | bool

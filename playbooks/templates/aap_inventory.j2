@@ -1,0 +1,48 @@
+{#
+  Single-node AAP installer inventory (controller + local PostgreSQL).
+
+  Required variables:
+    aap_inventory_admin_password  - Automation Controller admin password
+    aap_inventory_db_password     - PostgreSQL 'awx' user password
+    aap_inventory_registry_username / aap_inventory_registry_password
+                                  - Red Hat registry credentials used to pull EE images
+
+  Optional variables:
+    aap_inventory_version         - platform version to install (defaults to aap_version)
+    aap_inventory_web_port        - controller web port (defaults to 443)
+#}
+[automationcontroller]
+{{ aap_host_address }} ansible_connection=local
+
+[automationhub]
+
+[execution_nodes]
+
+[database]
+{{ aap_host_address }} ansible_connection=local
+
+[all:vars]
+# Platform Version
+automation_platform_version='{{ aap_inventory_version | default(aap_version) }}'
+
+# Web Admin UI Credentials
+admin_password='{{ aap_inventory_admin_password }}'
+
+# Red Hat Registry Credentials (required to pull EE containers)
+registry_username='{{ aap_inventory_registry_username }}'
+registry_password='{{ aap_inventory_registry_password }}'
+
+# Local PostgreSQL Database Configurations
+pg_sslmode='prefer'
+pg_host='{{ aap_host_address }}'
+pg_port='5432'
+pg_database='awx'
+pg_username='awx'
+pg_password='{{ aap_inventory_db_password }}'
+
+# UI Web Port
+controller_web_port={{ aap_inventory_web_port | default(443) }}
+
+# Additional configuration
+postgresql_data_dir={{ aap_pg_data_dir }}
+pg_backup_dir={{ aap_pg_backup_dir }}
