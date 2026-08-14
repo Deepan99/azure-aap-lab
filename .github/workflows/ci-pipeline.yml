@@ -42,9 +42,10 @@ jobs:
           terraform validate
 
       - name: Terraform Security Scan
-        uses: aquasecurity/tfsec-action@v1.28.1
+        uses: aquasecurity/tfsec-action@v1.0.3
         with:
           working_directory: terraform/
+          version: v1.28.1
           soft_fail: true
 
   validate-ansible:
