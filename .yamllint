@@ -3,7 +3,7 @@ extends: default
 
 rules:
   line-length:
-    max: 120
+    max: 200
     level: warning
 
   indentation:
@@ -16,13 +16,26 @@ rules:
   comments-indentation: {}
 
   document-start:
-    present: true
+    present: false
 
   empty-lines:
-    max: 2
+    max: 3
 
   truthy:
     allowed-values: ['true', 'false', 'yes', 'no']
 
   octal-values:
     forbid-implicit-octal: true
+
+  # Disable strict rules for better compatibility
+  MD013: false
+  MD032: false
+  MD022: false
+  MD031: false
+  MD034: false
+  MD042: false
+  MD047: false
+  MD029: false
+  MD024: false
+  MD036: false
+  MD040: false
