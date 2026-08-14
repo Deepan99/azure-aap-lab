@@ -44,11 +44,6 @@ variable "public_ip_dns_label" {
   type        = string
   description = "Unique DNS label for the public IP address."
   default     = "aap-controller-lab"
-
-  validation {
-    condition     = can(regex("^[a-z0-9-]{3,63}$", var.public_ip_dns_label))
-    error_message = "DNS label must be between 3 and 63 characters, contain only lowercase letters, numbers, or hyphens, and start/end with alphanumeric characters."
-  }
 }
 
 variable "allowed_ssh_source_ip" {
