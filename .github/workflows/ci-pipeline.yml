@@ -2,14 +2,19 @@ name: CI/CD Pipeline
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [main, develop]
   pull_request:
-    branches: [ main ]
+    branches: [main]
   workflow_dispatch:
 
+# Least-privilege default: jobs that need more (SARIF upload) opt in explicitly.
+permissions:
+  contents: read
+
 env:
-  TERRAFORM_VERSION: '1.5.0'
-  ANSIBLE_VERSION: '2.9.0'
+  TERRAFORM_VERSION: '1.9.8'
+  # ansible 2.9 is end-of-life and unpatched; track a supported release train.
+  ANSIBLE_VERSION: '11.9.0'
 
 jobs:
   validate-terraform:
@@ -19,9 +24,12 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v3
 
+      # Requires the Dependency graph (and GHAS on private repos); it errors out
+      # where that is unavailable, so it advises rather than gates.
       - name: Dependency Review
         uses: actions/dependency-review-action@v3
         if: github.event_name == 'pull_request'
+        continue-on-error: true
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v2
@@ -41,11 +49,15 @@ jobs:
           cd terraform
           terraform validate
 
+      # tfsec is deprecated and folded into Trivy; aquasecurity/tfsec-action has no
+      # v1.28.1 tag, so this step could never resolve.
       - name: Terraform Security Scan
-        uses: aquasecurity/tfsec-action@v1.28.1
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
-          working_directory: terraform/
-          soft_fail: true
+          scan-type: 'config'
+          scan-ref: 'terraform/'
+          exit-code: '1'
+          severity: 'HIGH,CRITICAL'
 
   validate-ansible:
     name: Validate Ansible Playbooks
@@ -92,32 +104,37 @@ jobs:
           yamllint -c .yamllint playbooks/ ansible/ terraform/
         continue-on-error: true
 
+      # These two checks gate the build: a hit means a credential may be about to
+      # land in the repository, so they must not be allowed to soft-fail.
       - name: Check for Security Issues
         run: |
-          grep -r "password:" playbooks/ ansible/ || true
-          if grep -r "password.*:" playbooks/ ansible/ | grep -v "vault_" | grep -v "lookup"; then
-            echo "WARNING: Potential hardcoded passwords found"
+          if grep -rE "^[^#]*password[a-z_]*:\s*['\"]?[A-Za-z0-9!@#$%^&*_-]{6,}" playbooks/ ansible/ \
+            | grep -v "vault_" | grep -v "lookup" | grep -v "{{" | grep -v "REPLACE_WITH"; then
+            echo "ERROR: Potential hardcoded passwords found"
             exit 1
           fi
-        continue-on-error: true
 
       - name: Check for Secret Tokens
         run: |
-          if grep -rE "(api_key|secret_key|access_token|private_key)" playbooks/ ansible/ | grep -v "vault_" | grep -v "lookup"; then
-            echo "WARNING: Potential secret tokens found"
+          if grep -rE "(api_key|secret_key|access_token|private_key)\s*[:=]\s*['\"]?[A-Za-z0-9/+_-]{16,}" playbooks/ ansible/ \
+            | grep -v "vault_" | grep -v "lookup" | grep -v "{{"; then
+            echo "ERROR: Potential secret tokens found"
             exit 1
           fi
-        continue-on-error: true
 
   security-scan:
     name: Security Scanning
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v3
 
       - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@master
+        # Pinned: '@master' runs unreviewed third-party code on every build.
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: 'fs'
           scan-ref: '.'
@@ -132,7 +149,7 @@ jobs:
 
       - name: Check for sensitive files
         run: |
-          if git ls-files | grep -E '\.vault$|vault\.yml$|secrets\.yml$'; then
+          if git ls-files | grep -E '\.vault$|vault\.yml$|secrets\.yml$|\.tfstate|\.tfvars$|\.pem$|(^|/)id_rsa'; then
             echo "ERROR: Sensitive files found in repository"
             exit 1
           fi
@@ -140,6 +157,9 @@ jobs:
   codeql-analysis:
     name: CodeQL Analysis
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
     needs: [validate-terraform, validate-ansible]
     if: github.event_name == 'push' || github.event_name == 'pull_request'
     steps:
@@ -149,13 +169,15 @@ jobs:
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v4
         with:
-          languages: python, yaml
+          # There is no application source here; 'actions' analyses the workflows
+          # themselves (yaml is not a CodeQL language and fails initialisation).
+          languages: actions
           queries: security-extended,security-and-quality
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v4
         with:
-          category: "/language:python-yaml"
+          category: "/language:actions"
 
   dependency-scan:
     name: Dependency Scanning

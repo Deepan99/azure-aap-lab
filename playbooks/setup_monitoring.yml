@@ -10,6 +10,10 @@
     install_azure_monitor: false
     install_prometheus: false
     install_grafana: false
+    # The metrics endpoint is unauthenticated, so it binds to loopback only.
+    # Scrape it locally or through an authenticated reverse proxy / SSH tunnel.
+    metrics_bind_address: "127.0.0.1"
+    metrics_port: 9100
 
   tasks:
     - name: Install monitoring dependencies
@@ -87,7 +91,7 @@
                   systemctl reload awx > /dev/null 2>&1 || true
               endscript
           }
-          
+
           /var/log/awx/*.log {
               daily
               rotate {{ log_retention_days }}
@@ -105,40 +109,42 @@
         content: |
           # AAP Metrics Exporter
           # Exposes AAP and system metrics for Prometheus
-          
+
           import psutil
           from prometheus_client import start_http_server, Gauge
           import time
           import subprocess
-          
+
           # System metrics
           cpu_gauge = Gauge('aap_system_cpu_percent', 'CPU usage percentage')
           memory_gauge = Gauge('aap_system_memory_percent', 'Memory usage percentage')
           disk_gauge = Gauge('aap_system_disk_percent', 'Disk usage percentage')
-          
+
           # AAP process metrics
           aap_processes = Gauge('aap_processes_count', 'Number of AAP processes running')
-          
+
           def get_aap_processes():
               try:
                   result = subprocess.run(['pgrep', '-f', 'awx'], capture_output=True, text=True)
                   return len(result.stdout.splitlines()) if result.returncode == 0 else 0
-              except:
+              except OSError:
                   return 0
-          
+
           def collect_metrics():
               cpu_gauge.set(psutil.cpu_percent(interval=1))
               memory_gauge.set(psutil.virtual_memory().percent)
               disk_gauge.set(psutil.disk_usage('/').percent)
               aap_processes.set(get_aap_processes())
-          
+
           if __name__ == '__main__':
-              start_http_server(9100)
-              print("Prometheus exporter started on port 9100")
+              start_http_server({{ metrics_port }}, addr='{{ metrics_bind_address }}')
+              print("Prometheus exporter listening on {{ metrics_bind_address }}:{{ metrics_port }}")
               while True:
                   collect_metrics()
                   time.sleep(60)
         dest: /usr/local/bin/aap_metrics_exporter.py
+        owner: root
+        group: root
         mode: '0755'
 
     - name: Create systemd service for metrics exporter
@@ -147,14 +153,23 @@
           [Unit]
           Description=AAP Metrics Exporter
           After=network.target awx.service
-          
+
           [Service]
           Type=simple
-          User=root
+          User=nobody
+          Group=nobody
           ExecStart=/usr/bin/python3 /usr/local/bin/aap_metrics_exporter.py
           Restart=always
           RestartSec=10
-          
+          NoNewPrivileges=true
+          PrivateTmp=true
+          ProtectSystem=strict
+          ProtectHome=true
+          ProtectKernelTunables=true
+          ProtectControlGroups=true
+          RestrictAddressFamilies=AF_INET AF_INET6
+          CapabilityBoundingSet=
+
           [Install]
           WantedBy=multi-user.target
         dest: /etc/systemd/system/aap-metrics-exporter.service
@@ -173,27 +188,40 @@
           dnf:
             name: azure-monitor-agent
             state: present
-          
+
+        - name: Assert Azure Monitor credentials are provided
+          assert:
+            that:
+              - azure_workspace_id | default('', true) | length > 0
+              - azure_shared_key | default('', true) | length > 0
+            fail_msg: >-
+              azure_workspace_id and azure_shared_key must be supplied (Ansible Vault
+              or extra vars) when install_azure_monitor is enabled.
+            quiet: true
+
         - name: Configure Azure Monitor
           copy:
             content: |
               # Azure Monitor Configuration
               # Requires Azure Monitor workspace and agent setup
-              
+
               [azure_monitor]
               enabled = true
-              workspace_id = {{ azure_workspace_id | default('WORKSPACE_ID') }}
-              shared_key = {{ azure_shared_key | default('SHARED_KEY') }}
-              
+              workspace_id = {{ azure_workspace_id }}
+              shared_key = {{ azure_shared_key }}
+
               [log_collection]
               collect_syslog = true
               collect_files = true
-              log_paths = 
+              log_paths =
                   /var/log/tower/
                   /var/log/awx/
                   /var/log/messages
             dest: /etc/azure-monitor/agent-config.yaml
+            owner: root
+            group: root
             mode: '0600'
+          no_log: true
           notify: Restart Azure Monitor Agent
 
       when: install_azure_monitor
@@ -204,17 +232,17 @@
           dnf:
             name: prometheus
             state: present
-          
+
         - name: Configure Prometheus to scrape AAP metrics
           copy:
             content: |
               global:
                 scrape_interval: 15s
-              
+
               scrape_configs:
                 - job_name: 'aap_metrics'
                   static_configs:
-                    - targets: ['localhost:9100']
+                    - targets: ['{{ metrics_bind_address }}:{{ metrics_port }}']
                     labels:
                       instance: 'aap-controller'
             dest: /etc/prometheus/prometheus.yml
@@ -229,7 +257,7 @@
           dnf:
             name: grafana
             state: present
-          
+
         - name: Start Grafana service
           systemd:
             name: grafana-server
@@ -243,13 +271,19 @@
           #!/bin/bash
           # AAP Health Check Script
           # Run this script to monitor AAP health status
-          
+
           # AAP API endpoint
           AAP_API="https://localhost/api/v2/ping/"
-          
+
+          # Certificate verification is skipped only because the AAP installer
+          # ships a self-signed certificate; set AAP_CA_BUNDLE once a trusted
+          # certificate is installed.
+          CURL_TLS_OPTS="${AAP_CA_BUNDLE:+--cacert $AAP_CA_BUNDLE}"
+          CURL_TLS_OPTS="${CURL_TLS_OPTS:--k}"
+
           # Check AAP API
           check_aap_api() {
-              response=$(curl -k -s -o /dev/null -w "%{http_code}" $AAP_API)
+              response=$(curl $CURL_TLS_OPTS -s -o /dev/null -w "%{http_code}" "$AAP_API")
               if [ $response -eq 200 ]; then
                   echo "✓ AAP API is healthy"
                   return 0
@@ -258,7 +292,7 @@
                   return 1
               fi
           }
-          
+
           # Check PostgreSQL
           check_postgresql() {
               systemctl is-active --quiet postgresql
@@ -270,7 +304,7 @@
                   return 1
               fi
           }
-          
+
           # Check AAP service
           check_aap_service() {
               systemctl is-active --quiet awx
@@ -282,7 +316,7 @@
                   return 1
               fi
           }
-          
+
           # Check disk space
           check_disk_space() {
               disk_usage=$(df / | tail -1 | awk '{print $5}' | sed 's/%//')
@@ -294,17 +328,17 @@
                   return 1
               fi
           }
-          
+
           # Main health check
           echo "AAP Health Check - $(date)"
           echo "=========================="
-          
+
           overall_health=0
           check_aap_api || overall_health=1
           check_postgresql || overall_health=1
           check_aap_service || overall_health=1
           check_disk_space || overall_health=1
-          
+
           echo "=========================="
           if [ $overall_health -eq 0 ]; then
               echo "Overall Health: HEALTHY"
@@ -314,7 +348,9 @@
               exit 1
           fi
         dest: /usr/local/bin/aap_health_check.sh
-        mode: '0755'
+        owner: root
+        group: root
+        mode: '0750'
 
     - name: Setup automated health checks with cron
       cron:
@@ -325,7 +361,7 @@
 
     - name: Display monitoring setup completion
       debug:
-        msg: "Monitoring and logging setup completed successfully. Metrics available at http://localhost:9100/metrics"
+        msg: "Monitoring and logging setup completed successfully. Metrics available at http://{{ metrics_bind_address }}:{{ metrics_port }}/metrics (loopback only)"
 
   handlers:
     - name: Restart AAP services

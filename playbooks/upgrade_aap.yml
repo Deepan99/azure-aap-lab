@@ -12,6 +12,8 @@
     target_version: "2.5"  # Set desired target version
     backup_before_upgrade: true
     upgrade_timeout: 3600  # 1 hour
+    aap_admin_password: "{{ vault_aap_admin_password | default(lookup('env', 'AAP_ADMIN_PASSWORD'), true) }}"
+    aap_db_password: "{{ vault_aap_db_password | default(lookup('env', 'AAP_DB_PASSWORD'), true) }}"
 
   vars_prompt:
     - name: confirm_upgrade
@@ -30,6 +32,20 @@
         that:
           - confirm_upgrade | lower == "yes"
         fail_msg: "Upgrade not confirmed. Please run playbook again and confirm with 'yes'"
+        quiet: true
+
+    - name: Assert that required credentials are provided
+      assert:
+        that:
+          - rh_username | default('', true) | length > 0
+          - rh_password | default('', true) | length > 0
+          - aap_admin_password | length >= 12
+          - aap_db_password | length >= 12
+        fail_msg: >-
+          Missing credentials. Provide vault_aap_admin_password/vault_aap_db_password
+          via Ansible Vault, or the AAP_ADMIN_PASSWORD/AAP_DB_PASSWORD environment
+          variables, so the upgraded inventory keeps the existing passwords.
+          Passwords must be at least 12 characters.
         quiet: true
 
     - name: Check current AAP version
@@ -52,7 +68,9 @@
           file:
             path: "{{ pre_upgrade_backup_dir }}"
             state: directory
-            mode: '0755'
+            owner: root
+            group: root
+            mode: '0700'
 
         - name: Run comprehensive backup
           include_tasks: tasks/backup_aap.yml
@@ -76,7 +94,7 @@
           uri:
             url: "{{ aap_api_ping_url }}"
             method: GET
-            validate_certs: false
+            validate_certs: "{{ aap_validate_certs }}"
           register: pre_upgrade_api
 
         - name: Display pre-upgrade status
@@ -108,11 +126,14 @@
       template:
         src: templates/aap_inventory.j2
         dest: "{{ aap_custom_inventory_dir }}/inventory-upgrade"
+        owner: root
+        group: root
         mode: '0600'
+      no_log: true
       vars:
         aap_inventory_version: "{{ target_version }}"
-        aap_inventory_admin_password: "{{ vault_aap_admin_password | default(lookup('env', 'AAP_ADMIN_PASSWORD')) | default('CHANGE_ME') }}"
-        aap_inventory_db_password: "{{ vault_aap_db_password | default(lookup('env', 'AAP_DB_PASSWORD')) | default('CHANGE_ME') }}"
+        aap_inventory_admin_password: "{{ aap_admin_password }}"
+        aap_inventory_db_password: "{{ aap_db_password }}"
         aap_inventory_registry_username: "{{ rh_username }}"
         aap_inventory_registry_password: "{{ rh_password }}"
 

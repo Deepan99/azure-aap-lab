@@ -36,7 +36,7 @@ Why this repo exists
 
 ## Quickstart (3-minute)
 1. Set up credentials using Ansible Vault (see `playbooks/SECURITY_SETUP.md`).
-2. Edit `terraform/terraform.tfvars` (set unique `public_ip_dns_label`, `ssh_public_key_path`, and `allowed_ssh_source_ip`).
+2. Copy `terraform/terraform.tfvars.example` to `terraform/terraform.tfvars` (git-ignored) and set a unique `public_ip_dns_label`, `ssh_public_key_path`, plus `allowed_ssh_source_ip` and `allowed_web_source_ip`. Both are required and must be specific CIDRs, e.g. `203.0.113.1/32`; `*` and `0.0.0.0/0` are rejected.
 3. cd terraform && terraform init && terraform apply -auto-approve
 4. Use `terraform` output to SSH to the VM, then cd to `/opt/aap-installer` and follow the installer steps in this README.
 
@@ -106,7 +106,8 @@ Before starting, ensure you have the following ready:
 - Do NOT commit secrets (passwords, client secrets, private keys) into this repository.
 - Change any default passwords in `/opt/aap-installer/inventory` before production use.
 - Use Ansible Vault for credential management (see `playbooks/SECURITY_SETUP.md`).
-- Restrict SSH access by setting `allowed_ssh_source_ip` in `terraform.tfvars` to your public IP.
+- Restrict access by setting `allowed_ssh_source_ip` and `allowed_web_source_ip` in `terraform.tfvars` to your public IP; internet-wide values are rejected.
+- Never commit `terraform.tfstate*` or `terraform.tfvars`: state files record public IPs, keys and other resource details in cleartext.
 
 ## Step 1: Provision infrastructure with Terraform
 

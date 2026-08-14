@@ -20,6 +20,20 @@
     installer_dir: "/opt/ansible-automation-platform/installer"
 
   tasks:
+    - name: Assert that required credentials are provided
+      assert:
+        that:
+          - rh_username | default('', true) | length > 0
+          - rh_password | default('', true) | length > 0
+          - aap_admin_password | default('', true) | length >= 12
+          - aap_db_password | default('', true) | length >= 12
+        fail_msg: >-
+          Missing credentials. Provide vault_rh_username/vault_rh_password/
+          vault_aap_admin_password/vault_aap_db_password via Ansible Vault, or the
+          RH_USERNAME/RH_PASSWORD/AAP_ADMIN_PASSWORD/AAP_DB_PASSWORD environment
+          variables. Passwords must be at least 12 characters.
+        quiet: true
+
     # ----------------------------------------------------
     # 1. System Registration & Subscriptions
     # ----------------------------------------------------
@@ -69,6 +83,7 @@
         owner: root
         group: root
         mode: '0600'
+      no_log: true
       vars:
         aap_inventory_admin_password: "{{ aap_admin_password }}"
         aap_inventory_db_password: "{{ aap_db_password }}"
