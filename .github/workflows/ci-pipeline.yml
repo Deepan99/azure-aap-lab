@@ -169,13 +169,15 @@ jobs:
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v4
         with:
-          languages: python, yaml
+          # There is no application source here; 'actions' analyses the workflows
+          # themselves (yaml is not a CodeQL language and fails initialisation).
+          languages: actions
           queries: security-extended,security-and-quality
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v4
         with:
-          category: "/language:python-yaml"
+          category: "/language:actions"
 
   dependency-scan:
     name: Dependency Scanning
