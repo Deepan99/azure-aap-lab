@@ -4,6 +4,9 @@
   become: true
   gather_facts: true
 
+  vars_files:
+    - vars/aap_common.yml
+
   vars:
     validation_results: []
     validation_failed: false
@@ -15,32 +18,10 @@
 
     - name: Test 1 - System Requirements Validation
       block:
-        - name: Check CPU cores
-          assert:
-            that:
-              - ansible_facts['processor_vcpus'] >= 4
-            fail_msg: "Insufficient CPU cores: {{ ansible_facts['processor_vcpus'] }} (minimum 4 required)"
-            quiet: true
-          register: cpu_check
-          ignore_errors: true
-
-        - name: Check memory
-          assert:
-            that:
-              - ansible_facts['memtotal_mb'] >= 16384
-            fail_msg: "Insufficient memory: {{ ansible_facts['memtotal_mb'] }}MB (minimum 16GB required)"
-            quiet: true
-          register: memory_check
-          ignore_errors: true
-
-        - name: Check disk space
-          assert:
-            that:
-              - ansible_mounts | selectattr('mount', 'equalto', '/') | map(attribute('size_available') | int > 50 * 1024 * 1024 * 1024) | first | default(false)
-            fail_msg: "Insufficient disk space (minimum 50GB required)"
-            quiet: true
-          register: disk_check
-          ignore_errors: true
+        - name: Check system requirements
+          include_tasks: tasks/check_system_requirements.yml
+          vars:
+            aap_requirements_soft_fail: true
 
         - name: Record system requirements result
           set_fact:
@@ -89,19 +70,19 @@
       block:
         - name: Check if AAP API is accessible
           uri:
-            url: "https://{{ ansible_default_ipv4.address | default(ansible_all_ipv4_addresses[0]) }}/api/v2/ping/"
+            url: "{{ aap_api_ping_url }}"
             method: GET
             validate_certs: false
-            return_content: yes
+            return_content: true
           register: api_check
           ignore_errors: true
 
         - name: Check web interface accessibility
           uri:
-            url: "https://{{ ansible_default_ipv4.address | default(ansible_all_ipv4_addresses[0]) }}/"
+            url: "{{ aap_base_url }}/"
             method: GET
             validate_certs: false
-            return_content: yes
+            return_content: true
           register: web_check
           ignore_errors: true
 
@@ -157,7 +138,7 @@
 
         - name: Check installer directory
           stat:
-            path: /usr/share/ansible-automation-platform-installer
+            path: "{{ aap_installer_dir }}"
           register: installer_check
           ignore_errors: true
 
@@ -192,12 +173,12 @@
       block:
         - name: Test admin authentication
           uri:
-            url: "https://{{ ansible_default_ipv4.address | default(ansible_all_ipv4_addresses[0]) }}/api/v2/me/"
+            url: "{{ aap_api_me_url }}"
             method: GET
             user: "admin"
             password: "{{ vault_aap_admin_password | default(lookup('env', 'AAP_ADMIN_PASSWORD')) | default('admin') }}"
             validate_certs: false
-            return_content: yes
+            return_content: true
           register: auth_check
           ignore_errors: true
 
@@ -255,13 +236,13 @@
       block:
         - name: Check backup directory
           stat:
-            path: /opt/aap-backups
+            path: "{{ aap_backup_dir }}"
           register: backup_dir_check
           ignore_errors: true
 
         - name: Check backup playbook exists
           stat:
-            path: /opt/aap-backups
+            path: "{{ aap_backup_dir }}"
           register: backup_config_check
           ignore_errors: true
 
@@ -281,7 +262,7 @@
         mode: '0644'
       vars:
         report_content: "{{ validation_results }}"
-        overall_status: "PASS" if not validation_failed else "FAIL"
+        overall_status: "{{ 'PASS' if not validation_failed else 'FAIL' }}"
 
     - name: Display validation summary
       debug:

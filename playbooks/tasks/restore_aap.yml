@@ -1,0 +1,111 @@
+---
+# Restore AAP from a backup created by tasks/backup_aap.yml.
+# Included by restore_aap.yml and by upgrade_aap.yml (rollback on failure).
+#
+# Required variables:
+#   backup_date    - backup subdirectory to restore (e.g. "20260814T120000")
+# Optional variables:
+#   backup_dir     - root backup directory (defaults to aap_backup_dir)
+#   restore_method - database | config | full (defaults to database)
+
+- name: Resolve backup source directory
+  set_fact:
+    aap_restore_path: "{{ backup_dir | default(aap_backup_dir) }}/{{ backup_date }}"
+    aap_restore_method: "{{ restore_method | default('database') }}"
+
+- name: Validate backup directory exists
+  stat:
+    path: "{{ aap_restore_path }}"
+  register: backup_check
+  failed_when: not backup_check.stat.exists
+
+- name: Display backup manifest
+  slurp:
+    src: "{{ aap_restore_path }}/MANIFEST.txt"
+  register: manifest
+  when: backup_check.stat.exists
+
+- name: Show backup information
+  debug:
+    msg: "{{ manifest.content | b64decode }}"
+
+- name: Confirm restore operation
+  pause:
+    prompt: "Are you sure you want to restore from {{ backup_date }}? This will overwrite current data. (yes/no)"
+  register: confirm_restore
+
+- name: Stop AAP services before restore
+  include_tasks: aap_services.yml
+  vars:
+    aap_services: "{{ aap_core_services | reverse | list }}"
+    aap_service_state: stopped
+  when: confirm_restore.user_input | bool
+
+- name: Restore PostgreSQL database
+  postgresql_db:
+    name: awx
+    state: restore
+    target: "{{ aap_restore_path }}/awx_db_backup.sql"
+  become_user: awx
+  when:
+    - confirm_restore.user_input | bool
+    - aap_restore_method in ['database', 'full']
+  register: db_restore
+  ignore_errors: true
+
+- name: Alert on database restore failure
+  debug:
+    msg: "WARNING: Database restore failed. Check backup file integrity and PostgreSQL status."
+  when:
+    - confirm_restore.user_input | bool
+    - db_restore is failed
+    - aap_restore_method in ['database', 'full']
+
+- name: Restore AAP configuration files
+  unarchive:
+    src: "{{ aap_restore_path }}/aap_config_backup.tar.gz"
+    dest: /
+    remote_src: true
+  when:
+    - confirm_restore.user_input | bool
+    - aap_restore_method in ['config', 'full']
+
+- name: Restore custom EE images and projects
+  unarchive:
+    src: "{{ aap_restore_path }}/aap_custom_content.tar.gz"
+    dest: /
+    remote_src: true
+  when:
+    - confirm_restore.user_input | bool
+    - aap_restore_method in ['config', 'full']
+
+- name: Restore AAP settings
+  shell: |
+    awx-manage import_settings {{ aap_restore_path }}/aap_settings.json
+  args:
+    chdir: /var/lib/awx
+  when:
+    - confirm_restore.user_input | bool
+    - aap_restore_method in ['config', 'full']
+  ignore_errors: true
+
+- name: Restart AAP services
+  include_tasks: aap_services.yml
+  vars:
+    aap_service_state: started
+    aap_service_enabled: true
+  when: confirm_restore.user_input | bool
+
+- name: Wait for AAP services to be ready
+  include_tasks: wait_for_aap.yml
+  when: confirm_restore.user_input | bool
+
+- name: Display restore completion status
+  debug:
+    msg: "Restore completed successfully from {{ backup_date }}! Please verify AAP functionality."
+  when: confirm_restore.user_input | bool
+
+- name: Display cancellation message
+  debug:
+    msg: "Restore operation cancelled by user."
+  when: not confirm_restore.user_input | bool

@@ -1,0 +1,53 @@
+---
+# Shared configuration for every AAP playbook in this repository.
+# Load it with `vars_files: - vars/aap_common.yml` (or `- ../playbooks/vars/aap_common.yml`
+# from outside the playbooks directory).
+
+# Platform and paths
+aap_version: "2.4"
+# Subscription repository holding the installer packages. Override aap_repo_version
+# (for example with target_version during an upgrade) to point at another release.
+aap_repo_version: "{{ aap_version }}"
+aap_repo_name: "ansible-automation-platform-{{ aap_repo_version }}-for-rhel-9-x86_64-rpms"
+aap_installer_dir: "/usr/share/ansible-automation-platform-installer"
+aap_custom_inventory_dir: "/opt/aap-installer"
+aap_backup_dir: "/opt/aap-backups"
+aap_backup_retention_days: 7
+
+# Address of the target host, used for inventory generation and API checks
+aap_host_address: "{{ ansible_default_ipv4.address | default(ansible_all_ipv4_addresses[0]) }}"
+aap_base_url: "https://{{ aap_host_address }}"
+aap_api_ping_url: "{{ aap_base_url }}/api/v2/ping/"
+aap_api_me_url: "{{ aap_base_url }}/api/v2/me/"
+
+# Services
+aap_core_services:
+  - postgresql
+  - awx
+aap_runtime_services:
+  - postgresql
+  - awx
+  - receptor
+
+# Packages required before the installer can run
+aap_system_packages:
+  - tar
+  - wget
+  - python3
+  - python3-pip
+  - git
+
+# Minimum system requirements for a single-node deployment
+aap_min_vcpus: 4
+aap_min_memory_mb: 16384
+aap_min_disk_gb: 50
+
+# API readiness polling
+aap_api_ready_retries: 30
+aap_api_ready_delay: 10
+aap_web_ready_retries: 10
+aap_web_ready_delay: 10
+
+# Local PostgreSQL layout written into the installer inventory
+aap_pg_data_dir: "/var/lib/pgsql/data"
+aap_pg_backup_dir: "/var/lib/pgbackups"
