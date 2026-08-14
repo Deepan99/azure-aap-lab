@@ -153,6 +153,7 @@
         - name: Backup existing configuration
           shell: |
             tar -czf /opt/aap-backup-pre-{{ ansible_date_time.epoch }}/aap_backup.tar.gz /etc/tower /var/lib/awx
+          changed_when: true
           when: existing_install.stat.exists
           ignore_errors: true
       when: true

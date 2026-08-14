@@ -83,6 +83,7 @@
         awx-manage import_settings {{ backup_dir }}/{{ backup_date }}/aap_settings.json
       args:
         chdir: /var/lib/awx
+      changed_when: true
       when: 
         - confirm_restore.user_input | bool
         - restore_method in ['config', 'full']
