@@ -1,0 +1,5 @@
+---
+collections:
+  - name: azure.azcollection
+  - name: community.general
+  - name: community.postgresql
