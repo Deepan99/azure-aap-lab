@@ -11,6 +11,11 @@
     upgrade_timeout: 3600  # 1 hour
     installer_dir: "/usr/share/ansible-automation-platform-installer"
     custom_inventory_dir: "/opt/aap-installer"
+    aap_admin_password: "{{ vault_aap_admin_password | default(lookup('env', 'AAP_ADMIN_PASSWORD'), true) }}"
+    aap_db_password: "{{ vault_aap_db_password | default(lookup('env', 'AAP_DB_PASSWORD'), true) }}"
+    # TLS verification for AAP API calls. Override with -e aap_validate_certs=false
+    # only for lab hosts still using the installer's self-signed certificate.
+    aap_validate_certs: true
 
   vars_prompt:
     - name: confirm_upgrade
@@ -31,6 +36,20 @@
         fail_msg: "Upgrade not confirmed. Please run playbook again and confirm with 'yes'"
         quiet: true
 
+    - name: Assert that required credentials are provided
+      assert:
+        that:
+          - rh_username | default('', true) | length > 0
+          - rh_password | default('', true) | length > 0
+          - aap_admin_password | length >= 12
+          - aap_db_password | length >= 12
+        fail_msg: >-
+          Missing credentials. Provide vault_aap_admin_password/vault_aap_db_password
+          via Ansible Vault, or the AAP_ADMIN_PASSWORD/AAP_DB_PASSWORD environment
+          variables, so the upgraded inventory keeps the existing passwords.
+          Passwords must be at least 12 characters.
+        quiet: true
+
     - name: Check current AAP version
       shell: |
         awx-manage --version
@@ -47,7 +66,9 @@
           file:
             path: "/opt/aap-backup-pre-upgrade-{{ ansible_date_time.iso8601_basic_short }}"
             state: directory
-            mode: '0755'
+            owner: root
+            group: root
+            mode: '0700'
 
         - name: Run comprehensive backup
           include_tasks: backup_aap.yml
@@ -59,6 +80,7 @@
             src: "{{ custom_inventory_dir }}/inventory"
             dest: "/opt/aap-backup-pre-upgrade-{{ ansible_date_time.iso8601_basic_short }}/inventory_backup"
             remote_src: true
+            mode: '0600'
       when: backup_before_upgrade
 
     - name: Pre-upgrade health check
@@ -76,7 +98,7 @@
           uri:
             url: "https://{{ ansible_default_ipv4.address | default(ansible_all_ipv4_addresses[0]) }}/api/v2/ping/"
             method: GET
-            validate_certs: false
+            validate_certs: "{{ aap_validate_certs }}"
           register: pre_upgrade_api
 
         - name: Display pre-upgrade status
@@ -124,21 +146,24 @@
           {% if lookup('file', custom_inventory_dir + '/inventory', errors='ignore') %}
           {% set old_inventory = lookup('file', custom_inventory_dir + '/inventory') %}
           {% endif %}
-          
-          admin_password='{{ vault_aap_admin_password | default(lookup('env', 'AAP_ADMIN_PASSWORD')) | default('CHANGE_ME') }}'
+
+          admin_password='{{ aap_admin_password }}'
           registry_username='{{ rh_username }}'
           registry_password='{{ rh_password }}'
-          
+
           pg_sslmode='prefer'
           pg_host='{{ ansible_default_ipv4.address | default(ansible_all_ipv4_addresses[0]) }}'
           pg_port='5432'
           pg_database='awx'
           pg_username='awx'
-          pg_password='{{ vault_aap_db_password | default(lookup('env', 'AAP_DB_PASSWORD')) | default('CHANGE_ME') }}'
-          
+          pg_password='{{ aap_db_password }}'
+
           controller_web_port=443
         dest: "{{ custom_inventory_dir }}/inventory-upgrade"
+        owner: root
+        group: root
         mode: '0600'
+      no_log: true
 
     - name: Run AAP upgrade
       command: "./setup.sh -i {{ custom_inventory_dir }}/inventory-upgrade"
@@ -167,7 +192,7 @@
       uri:
         url: "https://{{ ansible_default_ipv4.address | default(ansible_all_ipv4_addresses[0]) }}/api/v2/ping/"
         method: GET
-        validate_certs: false
+        validate_certs: "{{ aap_validate_certs }}"
         return_content: yes
       register: post_upgrade_api
       until: post_upgrade_api.status == 200
@@ -184,10 +209,10 @@
       debug:
         msg: |
           🎉 AAP Upgrade completed successfully!
-          
+
           Previous version: {{ current_version }}
           New version: {{ new_aap_version.stdout }}
-          
+
           Post-upgrade tasks:
           1. Verify AAP console functionality
           2. Test existing job templates
@@ -211,15 +236,15 @@
           Previous Version: {{ current_version }}
           New Version: {{ new_aap_version.stdout }}
           Host: {{ ansible_hostname }}
-          
+
           Upgrade Status: Success
           Backup Location: /opt/aap-backup-pre-upgrade-{{ ansible_date_time.iso8601_basic_short }}
-          
+
           Rollback Instructions:
           1. Stop AAP services
           2. Restore from backup: ansible-playbook restore_aap.yml -e "backup_date={{ ansible_date_time.iso8601_basic_short }}"
           3. Verify system functionality
-          
+
           Post-Upgrade Checklist:
           - [ ] Verify AAP console access
           - [ ] Test job execution

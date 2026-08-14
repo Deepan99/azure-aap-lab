@@ -11,11 +11,8 @@
       prompt: "Enter your Red Hat Customer Portal Password"
       private: true
   vars:
-    # Alternative: Use environment variables or vault
-    # rh_username: "{{ lookup('env', 'RH_USERNAME') }}"
-    # rh_password: "{{ lookup('env', 'RH_PASSWORD') }}"
-
-  vars:
+    # Alternative to the prompts above: supply credentials from the environment
+    # or Ansible Vault, e.g. -e rh_username="{{ lookup('env', 'RH_USERNAME') }}"
     aap_version: "2.4"
     installer_dir: "/usr/share/ansible-automation-platform-installer"
 
@@ -37,6 +34,7 @@
       retries: 3
       delay: 10
       ignore_errors: true
+      no_log: true
 
     - name: Alert on registration failure
       debug:
@@ -92,13 +90,15 @@
         name: ansible-automation-platform-installer
         state: present
 
+    # The inventory in this directory holds the AAP admin, database and registry
+    # passwords, so it is restricted to its owner.
     - name: Ensure target directory exists for custom configuration
       file:
         path: /opt/aap-installer
         state: directory
         owner: "{{ ansible_user | default('azureuser') }}"
         group: "{{ ansible_user | default('azureuser') }}"
-        mode: '0755'
+        mode: '0700'
 
     - name: Copy official installer template to working directory
       copy:
@@ -106,6 +106,9 @@
         dest: "/opt/aap-installer/inventory"
         remote_src: true
         force: false
+        owner: "{{ ansible_user | default('azureuser') }}"
+        group: "{{ ansible_user | default('azureuser') }}"
+        mode: '0600'
 
     - name: Notify user of next steps
       debug:

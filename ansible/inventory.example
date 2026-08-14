@@ -20,7 +20,9 @@ localhost ansible_connection=local
 # ==========================================
 
 # Automation Controller Administrator Password
-admin_password='AdminSecurePassword123!'
+# Do NOT store real passwords here. Generate a unique value and keep it in
+# Ansible Vault (see playbooks/vault.yml.example) or an environment variable.
+admin_password='<REPLACE_WITH_UNIQUE_ADMIN_PASSWORD>'
 
 # PostgreSQL Database Settings
 pg_sslmode='prefer'
@@ -28,7 +30,7 @@ pg_host='localhost'
 pg_port='5432'
 pg_database='awx'
 pg_username='awx'
-pg_password='DbSecurePassword123!'
+pg_password='<REPLACE_WITH_UNIQUE_DB_PASSWORD>'
 
 # Automation Controller Config
 # Set the port the web UI will listen on (default is 443)

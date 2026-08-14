@@ -10,17 +10,30 @@
     retention_days: 7
 
   tasks:
+    - name: Validate backup date format
+      assert:
+        that:
+          - backup_date is match('^[0-9]{8}T[0-9]{6}$')
+        fail_msg: "backup_date must be a basic-short ISO8601 timestamp such as '20260814T120000'."
+        quiet: true
+
+    # Backups contain the AAP database and exported settings, so they must not be
+    # world-readable. The awx group needs write access for the database dump.
     - name: Create backup directory
       file:
         path: "{{ backup_dir }}"
         state: directory
-        mode: '0755'
+        owner: root
+        group: awx
+        mode: '0770'
 
     - name: Create timestamped backup subdirectory
       file:
         path: "{{ backup_dir }}/{{ backup_date }}"
         state: directory
-        mode: '0755'
+        owner: root
+        group: awx
+        mode: '0770'
 
     - name: Backup PostgreSQL database
       postgresql_db:
@@ -44,7 +57,7 @@
           - /var/lib/awx/
           - /etc/ansible-automation-platform/
         dest: "{{ backup_dir }}/{{ backup_date }}/aap_config_backup.tar.gz"
-        mode: '0644'
+        mode: '0600'
       register: config_backup
       ignore_errors: true
 
@@ -59,14 +72,27 @@
           - /var/lib/awx/projects/
           - /var/lib/awx/ee/
         dest: "{{ backup_dir }}/{{ backup_date }}/aap_custom_content.tar.gz"
-        mode: '0644'
+        mode: '0600'
 
     - name: Backup secrets
       shell: |
-        awx-manage export_settings --indent 2 > {{ backup_dir }}/{{ backup_date }}/aap_settings.json
+        umask 077
+        awx-manage export_settings --indent 2 > "{{ backup_dir }}/{{ backup_date }}/aap_settings.json"
       args:
         chdir: /var/lib/awx
       when: ansible_facts['services']['awx.service'] is defined
+      no_log: true
+
+    - name: Restrict permissions on exported settings and database dump
+      file:
+        path: "{{ backup_dir }}/{{ backup_date }}/{{ item }}"
+        owner: root
+        group: awx
+        mode: '0640'
+      loop:
+        - aap_settings.json
+        - awx_db_backup.sql
+      failed_when: false
 
     - name: Generate backup manifest
       copy:
@@ -76,17 +102,17 @@
           Date: {{ backup_date }}
           Host: {{ ansible_hostname }}
           AAP Version: {{ ansible_facts['packages']['ansible-automation-platform-installer'].version | default('unknown') }}
-          
+
           Backup Contents:
           - Database: {{ backup_dir }}/{{ backup_date }}/awx_db_backup.sql
           - Configuration: {{ backup_dir }}/{{ backup_date }}/aap_config_backup.tar.gz
           - Custom Content: {{ backup_dir }}/{{ backup_date }}/aap_custom_content.tar.gz
           - Settings: {{ backup_dir }}/{{ backup_date }}/aap_settings.json
-          
+
           Restoration Instructions:
           See restore_aap.yml playbook
         dest: "{{ backup_dir }}/{{ backup_date }}/MANIFEST.txt"
-        mode: '0644'
+        mode: '0600'
 
     - name: Clean up old backups (retention policy)
       find:

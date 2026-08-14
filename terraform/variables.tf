@@ -48,6 +48,20 @@ variable "public_ip_dns_label" {
 
 variable "allowed_ssh_source_ip" {
   type        = string
-  description = "CIDR block for allowed SSH source IP (e.g., 'YOUR_PUBLIC_IP/32'). Use '*' for any IP (not recommended for production)."
-  default     = "*"
+  description = "CIDR block allowed to reach SSH (e.g., 'YOUR_PUBLIC_IP/32'). Must be an explicit CIDR; wildcards are rejected."
+
+  validation {
+    condition     = can(cidrhost(var.allowed_ssh_source_ip, 0)) && var.allowed_ssh_source_ip != "0.0.0.0/0"
+    error_message = "allowed_ssh_source_ip must be a specific CIDR block such as '203.0.113.1/32'. Exposing SSH to '*' or '0.0.0.0/0' is not permitted."
+  }
+}
+
+variable "allowed_web_source_ip" {
+  type        = string
+  description = "CIDR block allowed to reach the AAP web console (443/8443). Must be an explicit CIDR; wildcards are rejected."
+
+  validation {
+    condition     = can(cidrhost(var.allowed_web_source_ip, 0)) && var.allowed_web_source_ip != "0.0.0.0/0"
+    error_message = "allowed_web_source_ip must be a specific CIDR block such as '203.0.113.1/32'. Exposing the console to '*' or '0.0.0.0/0' is not permitted."
+  }
 }

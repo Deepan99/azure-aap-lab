@@ -10,9 +10,22 @@
     subnet_name: "subnet-default"
     vm_name: "vm-aap-demo"
     admin_user: "azureuser"
-    ssh_key_path: "{{ lookup('env', 'SSH_PUBLIC_KEY_PATH') | default('~/.ssh/id_rsa.pub') }}"
+    ssh_key_path: "{{ lookup('env', 'SSH_PUBLIC_KEY_PATH') | default('~/.ssh/id_rsa.pub', true) }}"
+    # Source CIDR allowed to reach SSH on the demo VM. Must be set explicitly;
+    # opening 22/tcp to the internet is rejected below.
+    allowed_ssh_source_ip: "{{ lookup('env', 'ALLOWED_SSH_SOURCE_IP') | default('', true) }}"
 
   tasks:
+    - name: Validate SSH exposure
+      assert:
+        that:
+          - allowed_ssh_source_ip | length > 0
+          - allowed_ssh_source_ip not in ['*', '0.0.0.0/0', 'Internet', 'Any']
+        fail_msg: >-
+          Set allowed_ssh_source_ip (or ALLOWED_SSH_SOURCE_IP) to a specific CIDR
+          such as '203.0.113.1/32'. Exposing SSH to the internet is not permitted.
+        quiet: true
+
     - name: Create Resource Group
       azure.azcollection.azure_rm_resourcegroup:
         name: "{{ resource_group }}"
@@ -39,6 +52,7 @@
           - name: AllowSSH
             protocol: Tcp
             destination_port_range: 22
+            source_address_prefix: "{{ allowed_ssh_source_ip }}"
             access: Allow
             priority: 100
             direction: Inbound

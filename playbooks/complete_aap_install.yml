@@ -10,6 +10,9 @@
     custom_inventory_dir: "/opt/aap-installer"
     installation_timeout: 1800  # 30 minutes
     poll_interval: 30           # Check every 30 seconds
+    # TLS verification for AAP API calls. Override with -e aap_validate_certs=false
+    # only for lab hosts still using the installer's self-signed certificate.
+    aap_validate_certs: true
 
   vars_prompt:
     - name: rh_username
@@ -33,25 +36,8 @@
         that:
           - aap_admin_password | length >= 12
           - aap_db_password | length >= 12
-        fail_msg: "Passwords must be at least 12 characters long"
-        quiet: true
-      ignore_errors: true
-
-    - name: Alert on password validation failure
-      debug:
-        msg: "WARNING: Passwords do not meet complexity requirements. Please use stronger passwords."
-      when: 
-        - aap_admin_password | length < 12 or aap_db_password | length < 12
-
-    - name: Force password complexity validation
-      assert:
-        that:
-          - aap_admin_password | length >= 12
-          - aap_db_password | length >= 12
         fail_msg: "Installation aborted. Passwords must be at least 12 characters long for security."
         quiet: true
-      when: 
-        - aap_admin_password | length < 12 or aap_db_password | length < 12
 
     - name: Validate password contains mixed characters
       assert:
@@ -94,7 +80,9 @@
       file:
         path: "{{ custom_inventory_dir }}"
         state: directory
-        mode: '0755'
+        owner: root
+        group: root
+        mode: '0700'
 
     - name: Generate AAP installer inventory
       copy:
@@ -136,6 +124,7 @@
           pg_backup_dir=/var/lib/pgbackups
         dest: "{{ custom_inventory_dir }}/inventory"
         mode: '0600'
+      no_log: true
 
     - name: Backup existing installation if present
       block:
@@ -148,6 +137,9 @@
           file:
             path: /opt/aap-backup-pre-{{ ansible_date_time.epoch }}
             state: directory
+            owner: root
+            group: root
+            mode: '0700'
           when: existing_install.stat.exists
 
         - name: Backup existing configuration
@@ -183,7 +175,7 @@
       uri:
         url: "https://{{ ansible_default_ipv4.address | default(ansible_all_ipv4_addresses[0]) }}/api/v2/ping/"
         method: GET
-        validate_certs: false
+        validate_certs: "{{ aap_validate_certs }}"
         return_content: yes
       register: aap_ping
       until: aap_ping.status == 200
@@ -195,7 +187,7 @@
       uri:
         url: "https://{{ ansible_default_ipv4.address | default(ansible_all_ipv4_addresses[0]) }}/"
         method: GET
-        validate_certs: false
+        validate_certs: "{{ aap_validate_certs }}"
         return_content: yes
       register: aap_web
       until: aap_web.status == 200
@@ -209,31 +201,32 @@
         method: GET
         user: "admin"
         password: "{{ aap_admin_password }}"
-        validate_certs: false
+        validate_certs: "{{ aap_validate_certs }}"
         return_content: yes
       register: admin_login
       until: admin_login.status == 200
       retries: 5
       delay: 5
       timeout: 60
+      no_log: true
 
     - name: Display installation success message
       debug:
         msg: |
           🎉 AAP Installation completed successfully!
-          
+
           Access the AAP console at: https://{{ ansible_default_ipv4.address | default(ansible_all_ipv4_addresses[0]) }}
-          
+
           Login credentials:
           Username: admin
           Password: <your_admin_password>
-          
+
           Next steps:
           1. Access the web console
           2. Activate your Red Hat subscription
           3. Configure automation hub repositories
           4. Set up additional security (SSL certificates, etc.)
-          
+
           Post-installation recommendations:
           - Run setup_monitoring.yml to enable monitoring
           - Configure backup_aap.yml for regular backups
@@ -248,21 +241,21 @@
           AAP Version: {{ aap_version }}
           Host: {{ ansible_hostname }}
           IP Address: {{ ansible_default_ipv4.address | default(ansible_all_ipv4_addresses[0]) }}
-          
+
           System Information:
           CPU: {{ ansible_facts['processor_vcpus'] }} cores
           Memory: {{ ansible_facts['memtotal_mb'] }} MB
           Disk: {{ ansible_mounts | selectattr('mount', 'equalto', '/') | map(attribute='size_total') | first / 1024 / 1024 / 1024 }} GB
-          
+
           Installation Status: Success
           Installer Directory: {{ installer_dir }}
           Inventory File: {{ custom_inventory_dir }}/inventory
-          
+
           Important Files:
           - Inventory: {{ custom_inventory_dir }}/inventory
           - Logs: /var/log/tower/
           - Config: /etc/tower/
-          
+
           Next Steps:
           1. Access web console
           2. Activate subscription

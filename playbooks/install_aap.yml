@@ -8,16 +8,34 @@
     # Red Hat Portal Registration Credentials
     rh_username: "{{ vault_rh_username | default(lookup('env', 'RH_USERNAME')) }}"
     rh_password: "{{ vault_rh_password | default(lookup('env', 'RH_PASSWORD')) }}"
-    
+
     # AAP Platform Configuration
     aap_version: "2.4"
     aap_admin_password: "{{ vault_aap_admin_password | default(lookup('env', 'AAP_ADMIN_PASSWORD')) }}"
     aap_db_password: "{{ vault_aap_db_password | default(lookup('env', 'AAP_DB_PASSWORD')) }}"
-    
+
     # Paths
     installer_dir: "/opt/ansible-automation-platform/installer"
 
+    # TLS verification for AAP API calls. Override with -e aap_validate_certs=false
+    # only for lab hosts still using the installer's self-signed certificate.
+    aap_validate_certs: true
+
   tasks:
+    - name: Assert that required credentials are provided
+      assert:
+        that:
+          - rh_username | default('', true) | length > 0
+          - rh_password | default('', true) | length > 0
+          - aap_admin_password | default('', true) | length >= 12
+          - aap_db_password | default('', true) | length >= 12
+        fail_msg: >-
+          Missing credentials. Provide vault_rh_username/vault_rh_password/
+          vault_aap_admin_password/vault_aap_db_password via Ansible Vault, or the
+          RH_USERNAME/RH_PASSWORD/AAP_ADMIN_PASSWORD/AAP_DB_PASSWORD environment
+          variables. Passwords must be at least 12 characters.
+        quiet: true
+
     # ----------------------------------------------------
     # 1. System Registration & Subscriptions
     # ----------------------------------------------------
@@ -34,6 +52,7 @@
         state: present
       when: "'Current' not in sub_status.stdout"
       register: reg_result
+      no_log: true
 
     - name: Enable Ansible Automation Platform repository
       command: "subscription-manager repos --enable=ansible-automation-platform-{{ aap_version }}-for-rhel-9-x86-64-rpms"
@@ -126,6 +145,7 @@
         owner: root
         group: root
         mode: '0600'
+      no_log: true
 
     # ----------------------------------------------------
     # 4. Run the AAP Installer Script
@@ -172,7 +192,7 @@
       uri:
         url: "https://{{ ansible_default_ipv4.address | default(ansible_all_ipv4_addresses[0]) }}/api/v2/ping/"
         method: GET
-        validate_certs: false
+        validate_certs: "{{ aap_validate_certs }}"
         return_content: yes
       register: aap_ping
       until: aap_ping.status == 200
@@ -184,7 +204,7 @@
       uri:
         url: "https://{{ ansible_default_ipv4.address | default(ansible_all_ipv4_addresses[0]) }}/"
         method: GET
-        validate_certs: false
+        validate_certs: "{{ aap_validate_certs }}"
         return_content: yes
       register: aap_web
       until: aap_web.status == 200
