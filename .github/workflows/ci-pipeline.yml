@@ -19,9 +19,11 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v3
 
+      # Requires Dependency graph (plus Advanced Security on private repos).
       - name: Dependency Review
         uses: actions/dependency-review-action@v3
         if: github.event_name == 'pull_request'
+        continue-on-error: true
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v2
