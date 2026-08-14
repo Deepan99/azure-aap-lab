@@ -24,9 +24,12 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v3
 
+      # Requires the Dependency graph (and GHAS on private repos); it errors out
+      # where that is unavailable, so it advises rather than gates.
       - name: Dependency Review
         uses: actions/dependency-review-action@v3
         if: github.event_name == 'pull_request'
+        continue-on-error: true
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v2
