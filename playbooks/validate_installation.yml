@@ -281,7 +281,7 @@
         mode: '0644'
       vars:
         report_content: "{{ validation_results }}"
-        overall_status: "PASS" if not validation_failed else "FAIL"
+        overall_status: "{{ 'PASS' if not validation_failed else 'FAIL' }}"
 
     - name: Display validation summary
       debug:

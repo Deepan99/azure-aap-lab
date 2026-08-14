@@ -45,6 +45,8 @@
 
         - name: Enable Ansible subscription repository (RHEL only)
           command: subscription-manager repos --enable=ansible-2.9-for-rhel-8-x86_64-rpms
+          register: rhel8_repo
+          changed_when: "'is enabled' in rhel8_repo.stdout"
           when:
             - ansible_distribution == 'RedHat'
             - ansible_distribution_major_version == '8'
@@ -52,6 +54,8 @@
 
         - name: Enable Ansible Automation Platform repository (RHEL 9 only)
           command: subscription-manager repos --enable=ansible-automation-platform-2.4-for-rhel-9-x86_64-rpms
+          register: rhel9_repo
+          changed_when: "'is enabled' in rhel9_repo.stdout"
           when:
             - ansible_distribution == 'RedHat'
             - ansible_distribution_major_version == '9'

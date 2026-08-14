@@ -66,6 +66,7 @@
         awx-manage export_settings --indent 2 > {{ backup_dir }}/{{ backup_date }}/aap_settings.json
       args:
         chdir: /var/lib/awx
+      changed_when: true
       when: ansible_facts['services']['awx.service'] is defined
 
     - name: Generate backup manifest

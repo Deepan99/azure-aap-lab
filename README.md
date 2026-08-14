@@ -30,6 +30,7 @@ Why this repo exists
 - Repository Improvements
 - Troubleshooting
 - Cleanup
+- Running the test suite
 - Contributing
 - License
 - Contact
@@ -332,6 +333,23 @@ terraform destroy -auto-approve
 ```
 
 Note: this deletes the resource group, public IP, VM, and related resources.
+
+## Running the test suite
+
+`tests/` holds a pytest suite that statically validates the playbooks and the
+Terraform configuration without contacting Azure, so it runs offline and in CI:
+
+```bash
+pip install -r tests/requirements.txt
+pytest
+```
+
+It checks playbook structure (named plays and tasks, one module per task, no
+deprecated keywords, idempotent `command`/`shell` usage), credential hygiene (no
+literal secrets, hidden prompts, restrictive modes on generated credential
+files) and the Terraform configuration (documented variables and outputs,
+resolvable references, NSG rule sanity, VM sizing and image requirements for
+AAP).
 
 ## Security Best Practices
 
