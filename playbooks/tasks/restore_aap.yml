@@ -8,6 +8,19 @@
 #   backup_dir     - root backup directory (defaults to aap_backup_dir)
 #   restore_method - database | config | full (defaults to database)
 
+# backup_date and restore_method are interpolated into filesystem paths and
+# commands, so they are constrained to known-safe values first.
+- name: Validate restore parameters
+  assert:
+    that:
+      - backup_date is match('^[0-9]{8}T[0-9]{6}$')
+      - restore_method | default('database') in ['database', 'config', 'full']
+    fail_msg: >-
+      Invalid parameters. backup_date must be a basic-short ISO8601 timestamp
+      such as '20260814T120000' and restore_method must be one of
+      database, config, full.
+    quiet: true
+
 - name: Resolve backup source directory
   set_fact:
     aap_restore_path: "{{ backup_dir | default(aap_backup_dir) }}/{{ backup_date }}"
@@ -80,9 +93,11 @@
     - aap_restore_method in ['config', 'full']
 
 - name: Restore AAP settings
-  shell: |
-    awx-manage import_settings {{ aap_restore_path }}/aap_settings.json
-  args:
+  command:
+    argv:
+      - awx-manage
+      - import_settings
+      - "{{ aap_restore_path }}/aap_settings.json"
     chdir: /var/lib/awx
   when:
     - confirm_restore.user_input | bool

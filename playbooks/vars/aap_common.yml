@@ -42,6 +42,10 @@ aap_min_vcpus: 4
 aap_min_memory_mb: 16384
 aap_min_disk_gb: 50
 
+# TLS verification for every AAP API call. Override with -e aap_validate_certs=false
+# only for lab hosts still using the installer's self-signed certificate.
+aap_validate_certs: true
+
 # API readiness polling
 aap_api_ready_retries: 30
 aap_api_ready_delay: 10

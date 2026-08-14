@@ -7,21 +7,34 @@
 #   backup_date    - backup subdirectory name (defaults to the current timestamp)
 #   retention_days - age at which old backup directories are pruned
 
+- name: Validate backup date format
+  assert:
+    that:
+      - backup_date | default(ansible_date_time.iso8601_basic_short) is match('^[0-9]{8}T[0-9]{6}$')
+    fail_msg: "backup_date must be a basic-short ISO8601 timestamp such as '20260814T120000'."
+    quiet: true
+
 - name: Resolve backup target directory
   set_fact:
     aap_backup_path: "{{ backup_dir | default(aap_backup_dir) }}/{{ backup_date | default(ansible_date_time.iso8601_basic_short) }}"
 
+# Backups contain the AAP database and exported settings, so they must not be
+# world-readable. The awx group needs write access for the database dump.
 - name: Create backup directory
   file:
     path: "{{ backup_dir | default(aap_backup_dir) }}"
     state: directory
-    mode: '0755'
+    owner: root
+    group: awx
+    mode: '0770'
 
 - name: Create timestamped backup subdirectory
   file:
     path: "{{ aap_backup_path }}"
     state: directory
-    mode: '0755'
+    owner: root
+    group: awx
+    mode: '0770'
 
 - name: Backup PostgreSQL database
   postgresql_db:
@@ -45,7 +58,7 @@
       - /var/lib/awx/
       - /etc/ansible-automation-platform/
     dest: "{{ aap_backup_path }}/aap_config_backup.tar.gz"
-    mode: '0644'
+    mode: '0600'
   register: config_backup
   ignore_errors: true
 
@@ -60,14 +73,27 @@
       - /var/lib/awx/projects/
       - /var/lib/awx/ee/
     dest: "{{ aap_backup_path }}/aap_custom_content.tar.gz"
-    mode: '0644'
+    mode: '0600'
 
 - name: Backup secrets
   shell: |
-    awx-manage export_settings --indent 2 > {{ aap_backup_path }}/aap_settings.json
+    umask 077
+    awx-manage export_settings --indent 2 > "{{ aap_backup_path }}/aap_settings.json"
   args:
     chdir: /var/lib/awx
   when: ansible_facts['services']['awx.service'] is defined
+  no_log: true
+
+- name: Restrict permissions on exported settings and database dump
+  file:
+    path: "{{ aap_backup_path }}/{{ item }}"
+    owner: root
+    group: awx
+    mode: '0640'
+  loop:
+    - aap_settings.json
+    - awx_db_backup.sql
+  failed_when: false
 
 - name: Generate backup manifest
   copy:
@@ -87,7 +113,7 @@
       Restoration Instructions:
       See restore_aap.yml playbook
     dest: "{{ aap_backup_path }}/MANIFEST.txt"
-    mode: '0644'
+    mode: '0600'
 
 - name: Clean up old backups (retention policy)
   find:

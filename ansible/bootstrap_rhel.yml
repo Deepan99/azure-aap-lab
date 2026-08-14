@@ -13,11 +13,6 @@
   vars_files:
     - ../playbooks/vars/aap_common.yml
 
-  vars:
-    # Alternative: Use environment variables or vault
-    # rh_username: "{{ lookup('env', 'RH_USERNAME') }}"
-    # rh_password: "{{ lookup('env', 'RH_PASSWORD') }}"
-
   tasks:
     - name: Register system and enable AAP repositories
       include_tasks: ../playbooks/tasks/redhat_subscription.yml
@@ -33,13 +28,15 @@
         name: ansible-automation-platform-installer
         state: present
 
+    # The inventory in this directory holds the AAP admin, database and registry
+    # passwords, so it is restricted to its owner.
     - name: Ensure target directory exists for custom configuration
       file:
         path: "{{ aap_custom_inventory_dir }}"
         state: directory
         owner: "{{ ansible_user | default('azureuser') }}"
         group: "{{ ansible_user | default('azureuser') }}"
-        mode: '0755'
+        mode: '0700'
 
     - name: Copy official installer template to working directory
       copy:
@@ -47,6 +44,9 @@
         dest: "{{ aap_custom_inventory_dir }}/inventory"
         remote_src: true
         force: false
+        owner: "{{ ansible_user | default('azureuser') }}"
+        group: "{{ ansible_user | default('azureuser') }}"
+        mode: '0600'
 
     - name: Notify user of next steps
       debug:

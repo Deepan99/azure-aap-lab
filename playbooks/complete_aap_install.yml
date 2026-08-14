@@ -33,25 +33,8 @@
         that:
           - aap_admin_password | length >= 12
           - aap_db_password | length >= 12
-        fail_msg: "Passwords must be at least 12 characters long"
-        quiet: true
-      ignore_errors: true
-
-    - name: Alert on password validation failure
-      debug:
-        msg: "WARNING: Passwords do not meet complexity requirements. Please use stronger passwords."
-      when:
-        - aap_admin_password | length < 12 or aap_db_password | length < 12
-
-    - name: Force password complexity validation
-      assert:
-        that:
-          - aap_admin_password | length >= 12
-          - aap_db_password | length >= 12
         fail_msg: "Installation aborted. Passwords must be at least 12 characters long for security."
         quiet: true
-      when:
-        - aap_admin_password | length < 12 or aap_db_password | length < 12
 
     - name: Validate password contains mixed characters
       assert:
@@ -84,17 +67,23 @@
         name: ansible-automation-platform-installer
         state: present
 
+    # The generated inventory holds the admin, database and registry passwords.
     - name: Create custom inventory directory
       file:
         path: "{{ aap_custom_inventory_dir }}"
         state: directory
-        mode: '0755'
+        owner: root
+        group: root
+        mode: '0700'
 
     - name: Generate AAP installer inventory
       template:
         src: templates/aap_inventory.j2
         dest: "{{ aap_custom_inventory_dir }}/inventory"
+        owner: root
+        group: root
         mode: '0600'
+      no_log: true
       vars:
         aap_inventory_admin_password: "{{ aap_admin_password }}"
         aap_inventory_db_password: "{{ aap_db_password }}"
@@ -112,7 +101,9 @@
           file:
             path: /opt/aap-backup-pre-{{ ansible_date_time.epoch }}
             state: directory
-            mode: '0755'
+            owner: root
+            group: root
+            mode: '0700'
           when: existing_install.stat.exists
 
         - name: Backup existing configuration
@@ -148,13 +139,14 @@
         method: GET
         user: "admin"
         password: "{{ aap_admin_password }}"
-        validate_certs: false
+        validate_certs: "{{ aap_validate_certs }}"
         return_content: true
       register: admin_login
       until: admin_login.status == 200
       retries: 5
       delay: 5
       timeout: 60
+      no_log: true
 
     - name: Display installation success message
       debug:
