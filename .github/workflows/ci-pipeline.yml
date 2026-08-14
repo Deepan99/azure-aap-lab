@@ -285,7 +285,11 @@ jobs:
       - name: Configure Azure Credentials
         uses: azure/login@v1
         with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
+          client-id: ${{ fromJSON(secrets.AZURE_CREDENTIALS).clientId }}
+          tenant-id: ${{ fromJSON(secrets.AZURE_CREDENTIALS).tenantId }}
+          subscription-id: ${{ fromJSON(secrets.AZURE_CREDENTIALS).subscriptionId }}
+        env:
+          AZURE_CLIENT_SECRET: ${{ fromJSON(secrets.AZURE_CREDENTIALS).clientSecret }}
 
       - name: Pre-Deployment Backup
         run: |
