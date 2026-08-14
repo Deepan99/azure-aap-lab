@@ -19,9 +19,11 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v3
 
+      # Requires Dependency graph (plus Advanced Security on private repos).
       - name: Dependency Review
         uses: actions/dependency-review-action@v3
         if: github.event_name == 'pull_request'
+        continue-on-error: true
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v2
@@ -42,9 +44,10 @@ jobs:
           terraform validate
 
       - name: Terraform Security Scan
-        uses: aquasecurity/tfsec-action@v1.28.1
+        uses: aquasecurity/tfsec-action@v1.0.3
         with:
           working_directory: terraform/
+          version: v1.28.1
           soft_fail: true
 
   validate-ansible:
@@ -149,13 +152,15 @@ jobs:
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v4
         with:
-          languages: python, yaml
+          # CodeQL has no YAML/Ansible extractor, and the repo contains no Python;
+          # 'actions' analyses the workflow files themselves.
+          languages: actions
           queries: security-extended,security-and-quality
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v4
         with:
-          category: "/language:python-yaml"
+          category: "/language:actions"
 
   dependency-scan:
     name: Dependency Scanning
