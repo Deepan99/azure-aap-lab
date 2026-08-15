@@ -60,10 +60,15 @@ resource "azurerm_linux_virtual_machine" "vm" {
     data.azurerm_network_interface.nic.id,
   ]
 
-  # Remove SSH key requirement since we're using Azure AD authentication
-  disable_password_authentication = false
-  admin_password                  = var.admin_password
+  # Use SSH key authentication for security (required by Trivy)
+  disable_password_authentication = true
 
+  admin_ssh_key {
+    username   = var.admin_username
+    public_key = file(var.ssh_public_key_path)
+  }
+
+  # Enable managed identity for Azure AD SSH authentication
   identity {
     type = "SystemAssigned"
   }
