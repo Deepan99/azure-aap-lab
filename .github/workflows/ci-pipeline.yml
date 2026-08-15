@@ -314,6 +314,7 @@ jobs:
           subnet_name = "subnet-aap"
           public_ip_name = "pip-aap-controller"
           nsg_name = "nsg-aap-controller"
+          nic_name = "nic-aap-controller"
           admin_username = "azureuser"
           ssh_public_key_path = "~/.ssh/id_rsa.pub"
           public_ip_dns_label = "aap-controller-lab-${{ github.run_number }}"

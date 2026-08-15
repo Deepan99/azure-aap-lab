@@ -42,24 +42,10 @@ data "azurerm_network_security_group" "nsg" {
   resource_group_name = var.resource_group_name
 }
 
-# Network Interface (NIC)
-resource "azurerm_network_interface" "nic" {
-  name                = "nic-aap-controller"
-  location            = data.azurerm_resource_group.rg.location
-  resource_group_name = data.azurerm_resource_group.rg.name
-
-  ip_configuration {
-    name                          = "internal"
-    subnet_id                     = data.azurerm_subnet.subnet.id
-    private_ip_address_allocation = "Dynamic"
-    public_ip_address_id          = data.azurerm_public_ip.public_ip.id
-  }
-}
-
-# Associate NSG with NIC
-resource "azurerm_network_interface_security_group_association" "nic_nsg" {
-  network_interface_id      = azurerm_network_interface.nic.id
-  network_security_group_id = data.azurerm_network_security_group.nsg.id
+# Use existing Network Interface
+data "azurerm_network_interface" "nic" {
+  name                = var.nic_name
+  resource_group_name = var.resource_group_name
 }
 
 # Virtual Machine - Red Hat Enterprise Linux 9
@@ -71,7 +57,7 @@ resource "azurerm_linux_virtual_machine" "vm" {
   admin_username      = var.admin_username
 
   network_interface_ids = [
-    azurerm_network_interface.nic.id,
+    data.azurerm_network_interface.nic.id,
   ]
 
   admin_ssh_key {

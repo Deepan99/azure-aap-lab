@@ -51,6 +51,12 @@ variable "nsg_name" {
   default     = "nsg-aap-controller"
 }
 
+variable "nic_name" {
+  type        = string
+  description = "The name of the existing network interface to use."
+  default     = "nic-aap-controller"
+}
+
 variable "ssh_public_key_path" {
   type        = string
   description = "The path to the local SSH public key file to inject into the VM."
