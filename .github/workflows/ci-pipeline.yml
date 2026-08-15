@@ -379,7 +379,7 @@ jobs:
           chmod +x install-aap.sh
 
       - name: Upload AAP Installation Script
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: install-aap-script
           path: install-aap.sh
