@@ -62,7 +62,7 @@ resource "azurerm_linux_virtual_machine" "vm" {
 
   # Remove SSH key requirement since we're using Azure AD authentication
   disable_password_authentication = false
-  admin_password                 = var.admin_password
+  admin_password                  = var.admin_password
 
   identity {
     type = "SystemAssigned"
