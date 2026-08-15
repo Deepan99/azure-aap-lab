@@ -294,8 +294,21 @@ jobs:
 
       - name: Deploy Infrastructure
         run: |
-          echo "Deploying infrastructure..."
-          # cd terraform && terraform apply -auto-approve
+          cd terraform
+          terraform init
+          # Generate SSH key pair for the VM
+          ssh-keygen -t rsa -b 4096 -f ~/.ssh/id_rsa -N ""
+          cat > terraform.tfvars << EOF
+          resource_group_name = "rg-ansible-automation-platform"
+          location = "eastus"
+          vm_size = "Standard_D4s_v5"
+          admin_username = "azureuser"
+          ssh_public_key_path = "~/.ssh/id_rsa.pub"
+          public_ip_dns_label = "aap-controller-lab-unique"
+          allowed_ssh_source_ip = "0.0.0.0/0"
+          allowed_web_source_ip = "0.0.0.0/0"
+          EOF
+          terraform apply -auto-approve
 
       - name: Post-Deployment Validation
         run: |
