@@ -1,6 +1,6 @@
 output "resource_group_name" {
-  description = "The name of the created Resource Group."
-  value       = azurerm_resource_group.rg.name
+  description = "The name of the Resource Group."
+  value       = data.azurerm_resource_group.rg.name
 }
 
 output "public_ip_address" {
