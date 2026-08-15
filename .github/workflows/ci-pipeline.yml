@@ -304,7 +304,7 @@ jobs:
           # Generate SSH key pair for the VM
           ssh-keygen -t rsa -b 4096 -f ~/.ssh/id_rsa -N ""
           cat > terraform.tfvars << EOF
-          resource_group_name = "rg-ansible-automation-platform"
+          resource_group_name = "rg-ansible-automation-platform-${{ github.run_number }}"
           location = "eastus"
           vm_size = "Standard_D4s_v5"
           admin_username = "azureuser"
