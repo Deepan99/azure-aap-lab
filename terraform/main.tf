@@ -23,89 +23,23 @@ data "azurerm_virtual_network" "vnet" {
   resource_group_name = var.resource_group_name
 }
 
-# Create new Subnet in existing VNet
-resource "azurerm_subnet" "subnet" {
-  name                 = "subnet-aap"
+# Use existing Subnet
+data "azurerm_subnet" "subnet" {
+  name                 = var.subnet_name
   resource_group_name  = var.resource_group_name
   virtual_network_name = var.vnet_name
-  address_prefixes     = var.subnet_address_prefix
 }
 
-# Public IP
-resource "azurerm_public_ip" "public_ip" {
-  name                = "pip-aap-controller"
-  location            = data.azurerm_resource_group.rg.location
-  resource_group_name = data.azurerm_resource_group.rg.name
-  allocation_method   = "Static"
-  sku                 = "Standard"
-  domain_name_label   = var.public_ip_dns_label
+# Use existing Public IP
+data "azurerm_public_ip" "public_ip" {
+  name                = var.public_ip_name
+  resource_group_name = var.resource_group_name
 }
 
-# Network Security Group (NSG)
-resource "azurerm_network_security_group" "nsg" {
-  name                = "nsg-aap-controller"
-  location            = data.azurerm_resource_group.rg.location
-  resource_group_name = data.azurerm_resource_group.rg.name
-
-  security_rule {
-    name                       = "Allow-SSH"
-    priority                   = 1001
-    direction                  = "Inbound"
-    access                     = "Allow"
-    protocol                   = "Tcp"
-    source_port_range          = "*"
-    destination_port_range     = "22"
-    source_address_prefix      = var.allowed_ssh_source_ip
-    destination_address_prefix = "*"
-  }
-
-  security_rule {
-    name                       = "Allow-HTTP"
-    priority                   = 1002
-    direction                  = "Inbound"
-    access                     = "Allow"
-    protocol                   = "Tcp"
-    source_port_range          = "*"
-    destination_port_range     = "80"
-    source_address_prefix      = var.allowed_web_source_ip
-    destination_address_prefix = "*"
-  }
-
-  security_rule {
-    name                       = "Allow-HTTPS"
-    priority                   = 1003
-    direction                  = "Inbound"
-    access                     = "Allow"
-    protocol                   = "Tcp"
-    source_port_range          = "*"
-    destination_port_range     = "443"
-    source_address_prefix      = var.allowed_web_source_ip
-    destination_address_prefix = "*"
-  }
-
-  security_rule {
-    name                       = "Allow-AAP-Web"
-    priority                   = 1004
-    direction                  = "Inbound"
-    access                     = "Allow"
-    protocol                   = "Tcp"
-    source_port_range          = "*"
-    destination_port_range     = "8443"
-    source_address_prefix      = var.allowed_web_source_ip
-    destination_address_prefix = "*"
-  }
-
-  security_rule {
-    name                       = "Deny-All-Inbound"
-    priority                   = 4000
-    direction                  = "Inbound"
-    access                     = "Deny"
-    protocol                   = "*"
-    source_port_range          = "*"
-    destination_port_range     = "*"
-    source_address_prefix      = "*"
-    destination_address_prefix = "*"
-  }
+# Use existing Network Security Group
+data "azurerm_network_security_group" "nsg" {
+  name                = var.nsg_name
+  resource_group_name = var.resource_group_name
 }
 
 # Network Interface (NIC)
@@ -116,9 +50,9 @@ resource "azurerm_network_interface" "nic" {
 
   ip_configuration {
     name                          = "internal"
-    subnet_id                     = azurerm_subnet.subnet.id
+    subnet_id                     = data.azurerm_subnet.subnet.id
     private_ip_address_allocation = "Dynamic"
-    public_ip_address_id          = azurerm_public_ip.public_ip.id
+    public_ip_address_id          = data.azurerm_public_ip.public_ip.id
   }
 }
 

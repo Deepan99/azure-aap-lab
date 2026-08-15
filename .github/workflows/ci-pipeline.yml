@@ -311,7 +311,9 @@ jobs:
           location = "eastus"
           vm_size = "Standard_D4as_v7"
           vnet_name = "vnet-spoke-eastus"
-          subnet_address_prefix = ["10.1.5.0/24"]
+          subnet_name = "subnet-aap"
+          public_ip_name = "pip-aap-controller"
+          nsg_name = "nsg-aap-controller"
           admin_username = "azureuser"
           ssh_public_key_path = "~/.ssh/id_rsa.pub"
           public_ip_dns_label = "aap-controller-lab-${{ github.run_number }}"
