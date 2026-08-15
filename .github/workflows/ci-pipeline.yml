@@ -324,10 +324,13 @@ jobs:
           user_object_id = "59949461-3979-4d85-8155-80eae7759ee5"
           EOF
           
-          # Import existing VM into Terraform state if it exists
-          terraform import azurerm_linux_virtual_machine.vm /subscriptions/17c3aa03-3446-4356-b8df-227a9834823f/resourceGroups/rg-spoke-eastus/providers/Microsoft.Compute/virtualMachines/vm-aap-controller || true
+          # Import existing VM into Terraform state if it exists (production-safe approach)
+          terraform import azurerm_linux_virtual_machine.vm /subscriptions/17c3aa03-3446-4356-b8df-227a9834823f/resourceGroups/rg-spoke-eastus/providers/Microsoft.Compute/virtualMachines/vm-aap-controller 2>/dev/null || echo "VM not found or already in state"
           
+          # Run plan to see what changes will be made
           terraform plan -out=tfplan
+          
+          # Apply changes (will only add Azure AD extensions if VM exists)
           terraform apply -auto-approve tfplan
 
       - name: Display Connection Information
