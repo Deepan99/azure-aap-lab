@@ -309,7 +309,7 @@ jobs:
           vm_size = "Standard_D4s_v5"
           admin_username = "azureuser"
           ssh_public_key_path = "~/.ssh/id_rsa.pub"
-          public_ip_dns_label = "aap-controller-lab-unique"
+          public_ip_dns_label = "aap-controller-lab-${{ github.run_number }}"
           allowed_ssh_source_ip = "49.204.112.126/32"
           allowed_web_source_ip = "49.204.112.126/32"
           EOF
