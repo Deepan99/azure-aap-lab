@@ -13,7 +13,7 @@ variable "location" {
 variable "subnet_address_prefix" {
   type        = list(string)
   description = "The subnet address prefix."
-  default     = ["10.0.2.0/24"]
+  default     = ["10.1.5.0/24"]
 }
 
 variable "vm_size" {
