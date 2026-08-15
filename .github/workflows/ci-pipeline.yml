@@ -278,6 +278,9 @@ jobs:
     environment:
       name: production
       url: https://your-aap-controller.cloudapp.azure.com
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v3
@@ -306,14 +309,15 @@ jobs:
           cat > terraform.tfvars << EOF
           resource_group_name = "rg-ansible-automation-platform-${{ github.run_number }}"
           location = "eastus"
-          vm_size = "Standard_D4s_v5"
+          vm_size = "Standard_D4s_v3"
           admin_username = "azureuser"
           ssh_public_key_path = "~/.ssh/id_rsa.pub"
           public_ip_dns_label = "aap-controller-lab-${{ github.run_number }}"
           allowed_ssh_source_ip = "49.204.112.126/32"
           allowed_web_source_ip = "49.204.112.126/32"
           EOF
-          terraform apply -auto-approve
+          terraform plan -out=tfplan
+          terraform apply -auto-approve tfplan
 
       - name: Post-Deployment Validation
         run: |
