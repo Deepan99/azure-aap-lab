@@ -57,6 +57,18 @@ variable "nic_name" {
   default     = "nic-aap-controller"
 }
 
+variable "tenant_id" {
+  type        = string
+  description = "The Azure AD Tenant ID for SSH authentication."
+  default     = "5ca3ed3e-abef-4544-9ab7-7213d76e8d64"
+}
+
+variable "user_object_id" {
+  type        = string
+  description = "The Azure AD User Object ID for SSH access."
+  default     = "59949461-3979-4d85-8155-80eae7759ee5"
+}
+
 variable "ssh_public_key_path" {
   type        = string
   description = "The path to the local SSH public key file to inject into the VM."

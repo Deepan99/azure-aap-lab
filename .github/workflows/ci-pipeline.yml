@@ -304,7 +304,7 @@ jobs:
         run: |
           cd terraform
           terraform init
-          # Generate SSH key pair for the VM
+          # Generate SSH key pair for the VM (fallback)
           ssh-keygen -t rsa -b 4096 -f ~/.ssh/id_rsa -N ""
           cat > terraform.tfvars << EOF
           resource_group_name = "rg-spoke-eastus"
@@ -320,23 +320,11 @@ jobs:
           public_ip_dns_label = "aap-controller-lab-${{ github.run_number }}"
           allowed_ssh_source_ip = "49.204.112.126/32"
           allowed_web_source_ip = "49.204.112.126/32"
+          tenant_id = "5ca3ed3e-abef-4544-9ab7-7213d76e8d64"
+          user_object_id = "59949461-3979-4d85-8155-80eae7759ee5"
           EOF
           terraform plan -out=tfplan
           terraform apply -auto-approve tfplan
-          
-          # Get the public IP address
-          PUBLIC_IP=$(terraform output -raw public_ip_address)
-          echo "PUBLIC_IP=$PUBLIC_IP" >> $GITHUB_ENV
-          
-          # Save SSH private key for user access
-          echo "SSH_PRIVATE_KEY=$(cat ~/.ssh/id_rsa | base64 -w 0)" >> $GITHUB_ENV
-
-      - name: Upload SSH Key
-        uses: actions/upload-artifact@v3
-        with:
-          name: ssh-private-key
-          path: ~/.ssh/id_rsa
-          retention-days: 7
 
       - name: Display Connection Information
         run: |
@@ -346,11 +334,11 @@ jobs:
           echo "=========================================="
           echo "Public IP: $(terraform output -raw public_ip_address)"
           echo "AAP Console URL: $(terraform output -raw aap_console_url)"
-          echo "SSH Command: $(terraform output -raw ssh_command)"
           echo "=========================================="
-          echo "SSH Key has been uploaded as an artifact"
-          echo "Download the SSH key from workflow artifacts"
-          echo "Then connect using: ssh -i downloaded_key azureuser@$(terraform output -raw public_ip_address)"
+          echo "SSH Access using Azure AD:"
+          echo "  ssh deepannkumar2_gmail.com#EXT#@deepannkumar2gmail.onmicrosoft.com@$(terraform output -raw public_ip_address)"
+          echo "=========================================="
+          echo "Note: First login may require MFA authentication"
           echo "=========================================="
 
       - name: Create AAP Installation Script

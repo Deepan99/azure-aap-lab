@@ -66,14 +66,15 @@ resource "azurerm_linux_virtual_machine" "vm" {
   }
 
   os_disk {
-    caching              = "ReadWrite"
-    storage_account_type = "Premium_LRS"
-    disk_size_gb         = 64 # Recommended for AAP installation
+    caching                   = "ReadWrite"
+    disk_size_gb              = 64
+    storage_account_type      = "Premium_LRS"
+    write_accelerator_enabled = false
   }
 
   source_image_reference {
-    publisher = "RedHat"
     offer     = "RHEL"
+    publisher = "RedHat"
     sku       = "9-lvm-gen2"
     version   = "latest"
   }
@@ -82,4 +83,27 @@ resource "azurerm_linux_virtual_machine" "vm" {
     Environment = "Lab"
     Project     = "Ansible Automation Platform"
   }
+}
+
+# Azure AD Login Extension for SSH
+resource "azurerm_virtual_machine_extension" "aad_ssh_login" {
+  name                       = "AADSSHLoginForLinux"
+  virtual_machine_id         = azurerm_linux_virtual_machine.vm.id
+  publisher                  = "Microsoft.Azure.ActiveDirectory"
+  type                       = "AADSSHLoginForLinux"
+  type_handler_version       = "1.0"
+  auto_upgrade_minor_version = true
+
+  settings = jsonencode({
+    "AADConfig" = {
+      "TenantId" = var.tenant_id
+    }
+  })
+}
+
+# Role Assignment for Azure AD Login
+resource "azurerm_role_assignment" "vm_login" {
+  scope                = azurerm_linux_virtual_machine.vm.id
+  role_definition_name = "Virtual Machine Administrator Login"
+  principal_id         = var.user_object_id
 }
