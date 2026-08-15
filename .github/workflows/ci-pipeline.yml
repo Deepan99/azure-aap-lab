@@ -282,6 +282,11 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v3
 
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+
       - name: Configure Azure Credentials
         uses: azure/login@v1
         with:
