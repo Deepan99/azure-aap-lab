@@ -33,11 +33,6 @@ variable "vnet_name" {
   description = "The name of the existing virtual network to use."
 }
 
-variable "subnet_name" {
-  type        = string
-  description = "The name of the existing subnet to use."
-}
-
 variable "ssh_public_key_path" {
   type        = string
   description = "The path to the local SSH public key file to inject into the VM."
