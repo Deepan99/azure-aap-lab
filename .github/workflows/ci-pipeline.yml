@@ -323,11 +323,79 @@ jobs:
           EOF
           terraform plan -out=tfplan
           terraform apply -auto-approve tfplan
+          
+          # Get the public IP address
+          PUBLIC_IP=$(terraform output -raw public_ip_address)
+          echo "PUBLIC_IP=$PUBLIC_IP" >> $GITHUB_ENV
+          
+          # Save SSH private key for user access
+          echo "SSH_PRIVATE_KEY=$(cat ~/.ssh/id_rsa | base64 -w 0)" >> $GITHUB_ENV
 
-      - name: Post-Deployment Validation
+      - name: Upload SSH Key
+        uses: actions/upload-artifact@v3
+        with:
+          name: ssh-private-key
+          path: ~/.ssh/id_rsa
+          retention-days: 7
+
+      - name: Display Connection Information
         run: |
-          echo "Running post-deployment validation..."
-          # Add validation commands here
+          cd terraform
+          echo "=========================================="
+          echo "Deployment Complete!"
+          echo "=========================================="
+          echo "Public IP: $(terraform output -raw public_ip_address)"
+          echo "AAP Console URL: $(terraform output -raw aap_console_url)"
+          echo "SSH Command: $(terraform output -raw ssh_command)"
+          echo "=========================================="
+          echo "SSH Key has been uploaded as an artifact"
+          echo "Download the SSH key from workflow artifacts"
+          echo "Then connect using: ssh -i downloaded_key azureuser@$(terraform output -raw public_ip_address)"
+          echo "=========================================="
+
+      - name: Create AAP Installation Script
+        run: |
+          cat > install-aap.sh << 'EOF'
+          #!/bin/bash
+          # Ansible Automation Platform Installation Script
+          # Run this on the VM after SSH connection
+          
+          echo "Installing Ansible Automation Platform..."
+          sudo dnf update -y
+          sudo dnf install -y wget curl git python3-pip ansible-core
+          
+          # Download AAP setup bundle
+          wget https://releases.ansible.com/ansible-tower/setup-bundle/extras/ansible-tower-setup-bundle-latest.el9.x86_64.tar.gz
+          tar xzf ansible-tower-setup-bundle-latest.el9.x86_64.tar.gz
+          cd ansible-tower-setup-bundle-*/
+          
+          # Create inventory file for AAP installation
+          cat > inventory << 'INV_EOF'
+          [tower]
+          localhost ansible_connection=local
+          
+          [all:vars]
+          admin_password='Admin@123'
+          pg_host=''
+          pg_port=''
+          pg_database=''
+          pg_username=''
+          pg_password=''
+          pg_sslmode='prefer'
+          INV_EOF
+          
+          # Run AAP setup (this will take 15-30 minutes)
+          sudo ./setup.sh
+          EOF
+          
+          chmod +x install-aap.sh
+
+      - name: Upload AAP Installation Script
+        uses: actions/upload-artifact@v3
+        with:
+          name: install-aap-script
+          path: install-aap.sh
+          retention-days: 7
 
       - name: Notify Deployment Status
         if: always()
