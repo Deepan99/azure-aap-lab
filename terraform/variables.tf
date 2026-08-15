@@ -19,7 +19,7 @@ variable "subnet_address_prefix" {
 variable "vm_size" {
   type        = string
   description = "The size of the virtual machine. AAP requires a minimum of 4 vCPUs and 16 GB RAM."
-  default     = "Standard_D4s_v5"
+  default     = "Standard_D4as_v7"
 }
 
 variable "admin_username" {
