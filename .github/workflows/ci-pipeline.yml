@@ -323,6 +323,10 @@ jobs:
           tenant_id = "5ca3ed3e-abef-4544-9ab7-7213d76e8d64"
           user_object_id = "59949461-3979-4d85-8155-80eae7759ee5"
           EOF
+          
+          # Import existing VM into Terraform state if it exists
+          terraform import azurerm_linux_virtual_machine.vm /subscriptions/17c3aa03-3446-4356-b8df-227a9834823f/resourceGroups/rg-spoke-eastus/providers/Microsoft.Compute/virtualMachines/vm-aap-controller || true
+          
           terraform plan -out=tfplan
           terraform apply -auto-approve tfplan
 
