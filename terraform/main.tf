@@ -59,7 +59,7 @@ resource "azurerm_network_interface" "nic" {
 # Associate NSG with NIC
 resource "azurerm_network_interface_security_group_association" "nic_nsg" {
   network_interface_id      = azurerm_network_interface.nic.id
-  network_security_group_id = azurerm_network_security_group.nsg.id
+  network_security_group_id = data.azurerm_network_security_group.nsg.id
 }
 
 # Virtual Machine - Red Hat Enterprise Linux 9
