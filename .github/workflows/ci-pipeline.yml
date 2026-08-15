@@ -306,6 +306,8 @@ jobs:
           terraform init
           # Generate SSH key pair for the VM (fallback)
           ssh-keygen -t rsa -b 4096 -f ~/.ssh/id_rsa -N ""
+          # Generate random password for VM
+          ADMIN_PASSWORD=$(openssl rand -base64 16)
           cat > terraform.tfvars << EOF
           resource_group_name = "rg-spoke-eastus"
           location = "eastus"
@@ -316,6 +318,7 @@ jobs:
           nsg_name = "nsg-aap-controller"
           nic_name = "nic-aap-controller"
           admin_username = "azureuser"
+          admin_password = "$ADMIN_PASSWORD"
           ssh_public_key_path = "~/.ssh/id_rsa.pub"
           public_ip_dns_label = "aap-controller-lab-${{ github.run_number }}"
           allowed_ssh_source_ip = "49.204.112.126/32"

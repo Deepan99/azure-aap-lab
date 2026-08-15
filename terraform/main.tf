@@ -60,9 +60,12 @@ resource "azurerm_linux_virtual_machine" "vm" {
     data.azurerm_network_interface.nic.id,
   ]
 
-  admin_ssh_key {
-    username   = var.admin_username
-    public_key = file(var.ssh_public_key_path)
+  # Remove SSH key requirement since we're using Azure AD authentication
+  disable_password_authentication = false
+  admin_password                 = var.admin_password
+
+  identity {
+    type = "SystemAssigned"
   }
 
   os_disk {
@@ -99,11 +102,4 @@ resource "azurerm_virtual_machine_extension" "aad_ssh_login" {
       "TenantId" = var.tenant_id
     }
   })
-}
-
-# Role Assignment for Azure AD Login
-resource "azurerm_role_assignment" "vm_login" {
-  scope                = azurerm_linux_virtual_machine.vm.id
-  role_definition_name = "Virtual Machine Administrator Login"
-  principal_id         = var.user_object_id
 }

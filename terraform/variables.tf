@@ -75,6 +75,12 @@ variable "ssh_public_key_path" {
   default     = "~/.ssh/id_rsa.pub"
 }
 
+variable "admin_password" {
+  type        = string
+  description = "The admin password for the VM (required when using Azure AD authentication)."
+  sensitive   = true
+}
+
 variable "public_ip_dns_label" {
   type        = string
   description = "Unique DNS label for the public IP address."
