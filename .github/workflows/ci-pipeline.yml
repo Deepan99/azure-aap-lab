@@ -311,7 +311,7 @@ jobs:
           location = "eastus"
           vm_size = "Standard_D4s_v3"
           vnet_name = "vnet-spoke-eastus"
-          subnet_name = "default"
+          subnet_address_prefix = ["10.0.2.0/24"]
           admin_username = "azureuser"
           ssh_public_key_path = "~/.ssh/id_rsa.pub"
           public_ip_dns_label = "aap-controller-lab-${{ github.run_number }}"

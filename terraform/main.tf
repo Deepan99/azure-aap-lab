@@ -23,11 +23,12 @@ data "azurerm_virtual_network" "vnet" {
   resource_group_name = var.resource_group_name
 }
 
-# Use existing Subnet
-data "azurerm_subnet" "subnet" {
-  name                 = var.subnet_name
+# Create new Subnet in existing VNet
+resource "azurerm_subnet" "subnet" {
+  name                 = "subnet-aap"
   resource_group_name  = var.resource_group_name
   virtual_network_name = var.vnet_name
+  address_prefixes     = var.subnet_address_prefix
 }
 
 # Public IP
@@ -115,7 +116,7 @@ resource "azurerm_network_interface" "nic" {
 
   ip_configuration {
     name                          = "internal"
-    subnet_id                     = data.azurerm_subnet.subnet.id
+    subnet_id                     = azurerm_subnet.subnet.id
     private_ip_address_allocation = "Dynamic"
     public_ip_address_id          = azurerm_public_ip.public_ip.id
   }

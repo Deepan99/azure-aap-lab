@@ -10,6 +10,12 @@ variable "location" {
   default     = "eastus"
 }
 
+variable "subnet_address_prefix" {
+  type        = list(string)
+  description = "The subnet address prefix."
+  default     = ["10.0.2.0/24"]
+}
+
 variable "vm_size" {
   type        = string
   description = "The size of the virtual machine. AAP requires a minimum of 4 vCPUs and 16 GB RAM."
