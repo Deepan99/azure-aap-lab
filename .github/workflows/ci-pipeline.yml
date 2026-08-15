@@ -333,6 +333,13 @@ jobs:
           # Apply changes (will only add Azure AD extensions if VM exists)
           terraform apply -auto-approve tfplan
 
+      - name: Upload SSH Key
+        uses: actions/upload-artifact@v4
+        with:
+          name: ssh-private-key
+          path: ~/.ssh/id_rsa
+          retention-days: 7
+
       - name: Display Connection Information
         run: |
           cd terraform
@@ -342,10 +349,15 @@ jobs:
           echo "Public IP: $(terraform output -raw public_ip_address)"
           echo "AAP Console URL: $(terraform output -raw aap_console_url)"
           echo "=========================================="
+          echo "SSH Access using SSH Key:"
+          echo "  Download 'ssh-private-key' artifact from this workflow"
+          echo "  chmod 600 downloaded_key"
+          echo "  ssh -i downloaded_key azureuser@$(terraform output -raw public_ip_address)"
+          echo "=========================================="
           echo "SSH Access using Azure AD:"
           echo "  ssh deepannkumar2_gmail.com#EXT#@deepannkumar2gmail.onmicrosoft.com@$(terraform output -raw public_ip_address)"
           echo "=========================================="
-          echo "Note: First login may require MFA authentication"
+          echo "Note: Download both 'ssh-private-key' and 'install-aap-script' artifacts"
           echo "=========================================="
 
       - name: Create AAP Installation Script
