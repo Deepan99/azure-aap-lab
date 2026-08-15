@@ -40,6 +40,15 @@ Why this repo exists
 3. cd terraform && terraform init && terraform apply -auto-approve
 4. Use `terraform` output to SSH to the VM, then cd to `/opt/aap-installer` and follow the installer steps in this README.
 
+## GitHub Actions Deployment
+
+For automated deployment using GitHub Actions:
+1. Push changes to main branch to trigger workflow
+2. Download `ssh-private-key` artifact from workflow run
+3. Download `install-aap-script` artifact from workflow run
+4. Connect to VM: `ssh -i downloaded_key azureuser@<public_ip>`
+5. Install AAP: `bash install-aap.sh`
+
 ## Architecture Diagram
 
 ```mermaid
