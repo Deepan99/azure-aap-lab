@@ -275,7 +275,6 @@ jobs:
     runs-on: ubuntu-latest
     needs: [integration-test]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    timeout-minutes: 5
     environment:
       name: production
       url: https://your-aap-controller.cloudapp.azure.com
@@ -303,8 +302,24 @@ jobs:
 
       - name: Deploy Infrastructure
         run: |
-          echo "Infrastructure deployment skipped due to time constraints"
-          echo "Use manual deployment or increase timeout for infrastructure jobs"
+          cd terraform
+          terraform init
+          # Generate SSH key pair for the VM
+          ssh-keygen -t rsa -b 4096 -f ~/.ssh/id_rsa -N ""
+          cat > terraform.tfvars << EOF
+          resource_group_name = "rg-spoke-eastus"
+          location = "eastus"
+          vm_size = "Standard_D4as_v7"
+          vnet_name = "vnet-spoke-eastus"
+          subnet_address_prefix = ["10.1.5.0/24"]
+          admin_username = "azureuser"
+          ssh_public_key_path = "~/.ssh/id_rsa.pub"
+          public_ip_dns_label = "aap-controller-lab-${{ github.run_number }}"
+          allowed_ssh_source_ip = "49.204.112.126/32"
+          allowed_web_source_ip = "49.204.112.126/32"
+          EOF
+          terraform plan -out=tfplan
+          terraform apply -auto-approve tfplan
 
       - name: Post-Deployment Validation
         run: |
