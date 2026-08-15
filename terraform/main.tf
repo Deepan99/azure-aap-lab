@@ -12,33 +12,29 @@ provider "azurerm" {
   features {}
 }
 
-# Resource Group
-resource "azurerm_resource_group" "rg" {
-  name     = var.resource_group_name
-  location = var.location
+# Use existing Resource Group
+data "azurerm_resource_group" "rg" {
+  name = var.resource_group_name
 }
 
-# Virtual Network
-resource "azurerm_virtual_network" "vnet" {
-  name                = "vnet-aap"
-  address_space       = var.vnet_address_space
-  location            = azurerm_resource_group.rg.location
-  resource_group_name = azurerm_resource_group.rg.name
+# Use existing Virtual Network
+data "azurerm_virtual_network" "vnet" {
+  name                = var.vnet_name
+  resource_group_name = var.resource_group_name
 }
 
-# Subnet
-resource "azurerm_subnet" "subnet" {
-  name                 = "subnet-aap"
-  resource_group_name  = azurerm_resource_group.rg.name
-  virtual_network_name = azurerm_virtual_network.vnet.name
-  address_prefixes     = var.subnet_address_prefix
+# Use existing Subnet
+data "azurerm_subnet" "subnet" {
+  name                 = var.subnet_name
+  resource_group_name  = var.resource_group_name
+  virtual_network_name = var.vnet_name
 }
 
 # Public IP
 resource "azurerm_public_ip" "public_ip" {
   name                = "pip-aap-controller"
-  location            = azurerm_resource_group.rg.location
-  resource_group_name = azurerm_resource_group.rg.name
+  location            = data.azurerm_resource_group.rg.location
+  resource_group_name = data.azurerm_resource_group.rg.name
   allocation_method   = "Static"
   sku                 = "Standard"
   domain_name_label   = var.public_ip_dns_label
@@ -47,8 +43,8 @@ resource "azurerm_public_ip" "public_ip" {
 # Network Security Group (NSG)
 resource "azurerm_network_security_group" "nsg" {
   name                = "nsg-aap-controller"
-  location            = azurerm_resource_group.rg.location
-  resource_group_name = azurerm_resource_group.rg.name
+  location            = data.azurerm_resource_group.rg.location
+  resource_group_name = data.azurerm_resource_group.rg.name
 
   security_rule {
     name                       = "Allow-SSH"
@@ -114,12 +110,12 @@ resource "azurerm_network_security_group" "nsg" {
 # Network Interface (NIC)
 resource "azurerm_network_interface" "nic" {
   name                = "nic-aap-controller"
-  location            = azurerm_resource_group.rg.location
-  resource_group_name = azurerm_resource_group.rg.name
+  location            = data.azurerm_resource_group.rg.location
+  resource_group_name = data.azurerm_resource_group.rg.name
 
   ip_configuration {
     name                          = "internal"
-    subnet_id                     = azurerm_subnet.subnet.id
+    subnet_id                     = data.azurerm_subnet.subnet.id
     private_ip_address_allocation = "Dynamic"
     public_ip_address_id          = azurerm_public_ip.public_ip.id
   }
@@ -134,8 +130,8 @@ resource "azurerm_network_interface_security_group_association" "nic_nsg" {
 # Virtual Machine - Red Hat Enterprise Linux 9
 resource "azurerm_linux_virtual_machine" "vm" {
   name                = "vm-aap-controller"
-  resource_group_name = azurerm_resource_group.rg.name
-  location            = azurerm_resource_group.rg.location
+  resource_group_name = data.azurerm_resource_group.rg.name
+  location            = data.azurerm_resource_group.rg.location
   size                = var.vm_size
   admin_username      = var.admin_username
 

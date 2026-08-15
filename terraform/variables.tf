@@ -10,18 +10,6 @@ variable "location" {
   default     = "eastus"
 }
 
-variable "vnet_address_space" {
-  type        = list(string)
-  description = "The address space for the virtual network."
-  default     = ["10.0.0.0/16"]
-}
-
-variable "subnet_address_prefix" {
-  type        = list(string)
-  description = "The subnet address prefix."
-  default     = ["10.0.1.0/24"]
-}
-
 variable "vm_size" {
   type        = string
   description = "The size of the virtual machine. AAP requires a minimum of 4 vCPUs and 16 GB RAM."
@@ -32,6 +20,16 @@ variable "admin_username" {
   type        = string
   description = "The administrator username for the VM."
   default     = "azureuser"
+}
+
+variable "vnet_name" {
+  type        = string
+  description = "The name of the existing virtual network to use."
+}
+
+variable "subnet_name" {
+  type        = string
+  description = "The name of the existing subnet to use."
 }
 
 variable "ssh_public_key_path" {

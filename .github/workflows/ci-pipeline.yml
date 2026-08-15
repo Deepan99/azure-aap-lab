@@ -307,9 +307,11 @@ jobs:
           # Generate SSH key pair for the VM
           ssh-keygen -t rsa -b 4096 -f ~/.ssh/id_rsa -N ""
           cat > terraform.tfvars << EOF
-          resource_group_name = "rg-ansible-automation-platform-${{ github.run_number }}"
-          location = "eastus2"
-          vm_size = "Standard_DS4_v2"
+          resource_group_name = "rg-spoke-eastus"
+          location = "eastus"
+          vm_size = "Standard_D4s_v3"
+          vnet_name = "vnet-spoke-eastus"
+          subnet_name = "default"
           admin_username = "azureuser"
           ssh_public_key_path = "~/.ssh/id_rsa.pub"
           public_ip_dns_label = "aap-controller-lab-${{ github.run_number }}"
